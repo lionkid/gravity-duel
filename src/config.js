@@ -3,7 +3,7 @@
 (function (GD) {
   'use strict';
 
-  GD.VERSION = 'M1';
+  GD.VERSION = 'M2';
   GD.DT = 1 / 60;                 // fixed physics step in seconds (60 Hz)
   GD.MAX_STEPS_PER_FRAME = 5;     // avoid spiral of death after a long frame
 
@@ -72,6 +72,40 @@
       wallBounce: 0.4,
       mechBounce: 0.5,
     },
+  };
+
+  // ---- Combat ----
+  // Gravity coefficient g: actual projectile fall = stage gravity × g. Speeds in px/s, times in seconds.
+  GD.WEAPONS = [
+    { id: 'beam',    name: 'BEAM RIFLE',    zh: '光束步槍', kind: 'projectile', dmg: 90,  speed: 900, g: 0.0, cooldown: 0.55, energy: 30, ammo: Infinity,
+      knock: 200, stun: 0.25, radius: 4, color: '#ff5ad6', trail: 46, passPlatforms: true, lifetime: 1.6, aimSpread: 30 },
+    { id: 'bazooka', name: 'HYPER BAZOOKA', zh: '火箭砲',   kind: 'projectile', dmg: 180, speed: 520, g: 1.0, cooldown: 1.1,  energy: 0,  ammo: 4, reload: 2.4,
+      knock: 440, stun: 0.45, radius: 8, color: '#ffb347', blast: 70, blastDmg: 70, shootable: true, lifetime: 6, aimSpread: 30 },
+    { id: 'mg',      name: 'MACHINE GUN',   zh: '機槍',     kind: 'projectile', dmg: 22,  speed: 720, g: 0.6, cooldown: 0.09, energy: 0,  ammo: 60, reload: 0.12, auto: true,
+      knock: 40,  stun: 0.08, radius: 3, color: '#ffe066', spread: 3, lifetime: 3, aimSpread: 30 },
+    { id: 'grenade', name: 'CRACKER',       zh: '榴彈',     kind: 'projectile', dmg: 120, speed: 560, g: 1.5, cooldown: 0.9,  energy: 0,  ammo: 6, reload: 2.0,
+      knock: 320, stun: 0.35, radius: 7, color: '#7fff7f', blast: 90, blastDmg: 120, contactOnly: false, selfDamage: true, fuse: 3.0, lob: -35, shootable: true, lifetime: 6, aimSpread: 25 },
+    { id: 'saber',   name: 'BEAM SABER',    zh: '光束軍刀', kind: 'melee',      dmg: 150, windup: 0.10, active: 0.15, recovery: 0.30, range: 70, dashRange: 30,
+      knock: 400, stun: 0.40, color: '#ff7a1a', iframes: 0.067 },
+  ];
+  // Head vulcan: every frame's built-in secondary. Never blocked by budget.
+  GD.VULCAN = { id: 'vulcan', name: 'VULCAN', zh: '火神砲', kind: 'projectile', dmg: 8, speed: 820, g: 0.5, cooldown: 0.07, energy: 0, ammo: 48, reload: 0.2, auto: true,
+    knock: 15, stun: 0.04, radius: 2, color: '#fff3a8', spread: 4, lifetime: 2.5, aimSpread: 30 };
+
+  GD.COMBAT = {
+    muzzleX: 30, muzzleY: 52,          // offset from feet center
+    gravityScale: 0.5,                 // projectiles feel half the stage gravity; the mech jump tuning stays separate
+    reloadDelay: 1.0,                  // seconds without firing before rounds come back
+    switchLag: 0.25,
+    armorPerPoint: 0.06,               // damage × (1 - armor × this)
+    guardDamage: 0.25, guardStun: 0.3, guardKnock: 0.3,
+    knockUpEarth: 0.35,                // fraction of knockback that lifts the target on Earth
+    spaceKnockMul: 1.25,
+    hitstunFriction: 0.3,
+    energyRegenBase: 12, energyRegenPerPoint: 3,
+    lowEnergyFlash: 0.4,
+    projectileVsProjectile: 8,         // extra hit radius when shooting down rockets
+    koFallStun: 1.0,
   };
 
   // Keyboard bindings use KeyboardEvent.code so they are layout independent.

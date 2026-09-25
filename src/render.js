@@ -30,6 +30,9 @@
       canvas.height = H * this.dpr;
       this.particles = [];
       this.ghosts = [];
+      this.blasts = [];     // expanding explosion rings
+      this.texts = [];      // floating damage numbers
+      this.shake = 0;
       this.fps = 60;
       this.time = 0;
       this.bg = null;
@@ -44,6 +47,9 @@
     reset() {
       this.particles.length = 0;
       this.ghosts.length = 0;
+      this.blasts.length = 0;
+      this.texts.length = 0;
+      this.shake = 0;
     }
 
     // Static backdrop is drawn once per stage into an offscreen canvas.
@@ -176,6 +182,51 @@
             this.spawn({ x: e.x - e.dx * 20, y: e.y - 42 - e.dy * 20, vx: -e.dx * (120 + Math.random() * 200) + (Math.random() - 0.5) * 60,
               vy: -e.dy * (120 + Math.random() * 200) + (Math.random() - 0.5) * 60, life: 0.3, size: 5, color: '#7fe3ff', additive: true, drag: 5 });
           }
+        } else if (e.type === 'fire') {
+          const w = GD.weaponById(e.weapon) || GD.VULCAN;
+          const col = e.weapon === 'vulcan' ? GD.VULCAN.color : w.color;
+          const n = e.weapon === 'bazooka' ? 14 : e.weapon === 'grenade' ? 4 : 5;
+          for (let i = 0; i < n; i++) {
+            this.spawn({ x: e.x, y: e.y, vx: e.dx * (200 + Math.random() * 300) + (Math.random() - 0.5) * 120,
+              vy: e.dy * (200 + Math.random() * 300) + (Math.random() - 0.5) * 120, life: 0.12 + Math.random() * 0.1, size: e.weapon === 'bazooka' ? 8 : 4,
+              color: i % 3 ? col : '#ffffff', additive: true, drag: 6 });
+          }
+          if (e.weapon === 'bazooka') this.shake = Math.max(this.shake, 3);
+        } else if (e.type === 'hit') {
+          const n = e.blocked ? 6 : Math.min(22, 6 + e.dmg / 8);
+          for (let i = 0; i < n; i++) {
+            const a = Math.atan2(-e.dy, -e.dx) + (Math.random() - 0.5) * 1.6;
+            const sp = 120 + Math.random() * 320;
+            this.spawn({ x: e.x, y: e.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.25 + Math.random() * 0.2, size: 3,
+              color: e.blocked ? '#7fe3ff' : (i % 2 ? '#ffd447' : '#ffffff'), additive: true, drag: 3, gravity: 400 });
+          }
+          this.texts.push({ x: e.x, y: e.y - 20, vy: -70, life: 0.8, max: 0.8, text: e.blocked ? `GUARD ${e.dmg}` : String(e.dmg),
+            color: e.blocked ? '#7fe3ff' : (e.dmg >= 100 ? '#ff7a1a' : '#ffffff'), big: e.dmg >= 100 });
+          this.shake = Math.max(this.shake, e.blocked ? 1 : Math.min(8, e.dmg / 18));
+        } else if (e.type === 'explode') {
+          this.blasts.push({ x: e.x, y: e.y, r: e.r, life: 0.35, max: 0.35 });
+          for (let i = 0; i < 40; i++) {
+            const a = Math.random() * Math.PI * 2;
+            const sp = 80 + Math.random() * 380;
+            this.spawn({ x: e.x, y: e.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.3 + Math.random() * 0.4, size: 4 + Math.random() * 6,
+              color: i % 3 === 0 ? '#fff2b0' : i % 3 === 1 ? '#ff8a2a' : '#ff4d2a', additive: true, drag: 3 });
+          }
+          for (let i = 0; i < 16; i++) {
+            const a = Math.random() * Math.PI * 2;
+            this.spawn({ x: e.x, y: e.y, vx: Math.cos(a) * 90, vy: Math.sin(a) * 90 - 40, life: 0.9, size: 9, color: '#4a4a52', drag: 1.5, grow: true });
+          }
+          this.shake = Math.max(this.shake, 10);
+        } else if (e.type === 'ricochet') {
+          for (let i = 0; i < 5; i++) {
+            this.spawn({ x: e.x, y: e.y, vx: (Math.random() - 0.5) * 260, vy: -60 - Math.random() * 180, life: 0.3, size: 2.5,
+              color: e.color, additive: true, drag: 2, gravity: 600 });
+          }
+        } else if (e.type === 'ko') {
+          this.shake = Math.max(this.shake, 14);
+          for (let i = 0; i < 30; i++) {
+            const a = Math.random() * Math.PI * 2;
+            this.spawn({ x: e.x, y: e.y - 40, vx: Math.cos(a) * 200, vy: Math.sin(a) * 200 - 80, life: 1.2, size: 6, color: '#ff7a1a', additive: true, drag: 1.5, gravity: 300 });
+          }
         } else if (e.type === 'overheat') {
           for (let i = 0; i < 14; i++) {
             this.spawn({ x: e.x, y: e.y - 60, vx: (Math.random() - 0.5) * 220, vy: -60 - Math.random() * 160,
@@ -225,12 +276,27 @@
       this.particles = this.particles.filter((p) => p.life > 0);
       for (const gh of this.ghosts) gh.life -= dt;
       this.ghosts = this.ghosts.filter((gh) => gh.life > 0);
+      for (const b of this.blasts) b.life -= dt;
+      this.blasts = this.blasts.filter((b) => b.life > 0);
+      for (const t of this.texts) { t.life -= dt; t.y += t.vy * dt; t.vy *= 0.92; }
+      this.texts = this.texts.filter((t) => t.life > 0);
+      this.shake = Math.max(0, this.shake - dt * 40);
+      // Rocket exhaust trails.
+      for (const p of world.projectiles) {
+        if (p.weapon.id === 'bazooka') {
+          this.spawn({ x: p.x, y: p.y, vx: -p.vx * 0.1 + (Math.random() - 0.5) * 40, vy: -p.vy * 0.1 + (Math.random() - 0.5) * 40,
+            life: 0.25, size: 6, color: Math.random() < 0.5 ? '#ff8a2a' : '#9a9aa2', additive: Math.random() < 0.5, drag: 2, grow: true });
+        }
+      }
     }
 
     draw(world, alpha, opts) {
       const ctx = this.ctx;
       ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-      ctx.drawImage(this.bg, 0, 0, W, H);
+      if (this.shake > 0.5 && !opts.paused) {
+        ctx.translate((Math.random() - 0.5) * this.shake, (Math.random() - 0.5) * this.shake);
+      }
+      ctx.drawImage(this.bg, -8, -8, W + 16, H + 16);
 
       for (const gh of this.ghosts) {
         ctx.globalAlpha = (gh.life / gh.max) * 0.45;
@@ -242,11 +308,22 @@
         const x = f.prevX + (f.x - f.prevX) * alpha;
         const y = f.prevY + (f.y - f.prevY) * alpha;
         this.drawMech(f, x, y, f.facing, null);
+        if (f.hitFlash > 0) {
+          ctx.globalAlpha = Math.min(1, f.hitFlash * 8);
+          this.drawMech(f, x, y, f.facing, '#ffffff');
+          ctx.globalAlpha = 1;
+        }
         if (f.guarding) this.drawGuard(f, x, y);
+        if (f.lowEnergy > 0) this.drawLowEnergy(f, x, y);
       }
 
+      this.drawProjectiles(world, alpha);
+      this.drawBlasts();
       this.drawParticles();
+      this.drawTexts();
+      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
       this.drawHud(world);
+      if (world.winner) this.drawKo(world);
       if (opts.debug) this.drawDebug(world, alpha);
       if (opts.paused) this.drawPause(opts);
     }
@@ -290,6 +367,8 @@
         liftF = 7; lb = -3; lf = 3;
       }
       if (st === 'dash') lean = 0.22;
+      if (st === 'hit') { lean = -0.35; liftF = 6; lf = 5; lb = -6; }
+      if (st === 'attack') { lean = 0.12; armSwing = 4; }
       if (st === 'thrust' || st === 'boost') lean = (f.thrustX * facing) * 0.18 + (st === 'boost' && this.stage.gravity > 0 ? 0 : 0);
       if (st === 'drift') lean = Math.sin(this.time * 1.5 + f.player) * 0.04;
       const squash = 1 - f.landSquash * 0.12;
@@ -297,9 +376,17 @@
       ctx.save();
       ctx.translate(x, y);
       ctx.scale(facing, squash);
-      ctx.translate(0, -36);
-      ctx.rotate(lean);
-      ctx.translate(0, 36);
+      if (st === 'down') {
+        // Knocked out: lying on its back (or tumbling slowly in space).
+        const spin = this.stage.gravity > 0 ? 0 : Math.sin(this.time * 0.8) * 0.2;
+        ctx.translate(-20, -14);
+        ctx.rotate(-Math.PI / 2 + spin);
+        ctx.translate(0, 0);
+      } else {
+        ctx.translate(0, -36);
+        ctx.rotate(lean);
+        ctx.translate(0, 36);
+      }
 
       // Back leg.
       R(-12 + lb, -34, 11, 30 - liftB, dark);
@@ -326,16 +413,157 @@
       ctx.beginPath();
       ctx.moveTo(-2, -82); ctx.lineTo(10, -92); ctx.lineTo(3, -82);
       ctx.fill();
-      // Front arm.
+      // Front arm and weapon.
       R(10, -70, 14, 12, body);
+      const weapon = f.weapon ? GD.activeWeapon(f) : null;
       if (st === 'guard') {
         R(18, -64, 20, 9, body);
         R(36, -64, 6, 9, dark);
+      } else if (f.melee) {
+        const m = f.melee, w = m.w;
+        const phase = m.t < w.windup ? m.t / w.windup : 1;
+        const swing = m.t < w.windup ? -0.9 + phase * 0.9 : Math.min(1, (m.t - w.windup) / w.active) * 0.6;
+        ctx.save();
+        ctx.translate(16, -62);
+        ctx.rotate(swing);
+        R(0, -4, 14, 8, body);
+        R(14, -3, 10, 6, ghostColor || '#59606e');
+        if (!ghostColor) {
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.fillStyle = 'rgba(255,122,26,0.35)';
+          ctx.fillRect(22, -8, m.range - 6, 16);
+          ctx.fillStyle = '#ffd7a8';
+          ctx.fillRect(22, -3, m.range - 6, 6);
+          ctx.globalCompositeOperation = 'source-over';
+        }
+        ctx.restore();
       } else {
+        const recoil = f.recoil ? f.recoil * 4 : 0;
         R(12 + armSwing, -58, 10, 18, body);
         R(12 + armSwing, -40, 10, 5, dark);
+        if (weapon && weapon.kind === 'projectile' && weapon.id !== 'vulcan') {
+          // Rifle held at shoulder height; bigger silhouettes for heavy weapons.
+          const aim = -(f.lastAim || 0) * Math.PI / 180 * 0.5;
+          ctx.save();
+          ctx.translate(14 - recoil, -62);
+          ctx.rotate(-aim);
+          if (weapon.id === 'bazooka') { R(-8, -6, 40, 10, ghostColor || '#59606e'); R(28, -8, 8, 14, ghostColor || '#2f333d'); }
+          else if (weapon.id === 'grenade') { R(0, -4, 16, 8, ghostColor || '#59606e'); }
+          else { R(0, -4, 30, 6, ghostColor || '#59606e'); R(22, -6, 6, 10, ghostColor || weapon.color); }
+          ctx.restore();
+        } else if (weapon && weapon.id === 'vulcan') {
+          R(0, -74, 10, 3, ghostColor || '#ffe066');
+        } else if (weapon && weapon.kind === 'melee') {
+          R(20, -62, 6, 14, ghostColor || '#59606e'); // sheathed saber hilt
+        }
       }
       ctx.restore();
+    }
+
+    drawProjectiles(world, alpha) {
+      const ctx = this.ctx;
+      for (const p of world.projectiles) {
+        const x = p.prevX + (p.x - p.prevX) * alpha;
+        const y = p.prevY + (p.y - p.prevY) * alpha;
+        const w = p.weapon;
+        const ang = Math.atan2(p.vy, p.vx);
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(ang);
+        ctx.globalCompositeOperation = 'lighter';
+        if (w.id === 'beam') {
+          const grad = ctx.createLinearGradient(-w.trail, 0, 0, 0);
+          grad.addColorStop(0, 'rgba(255,90,214,0)');
+          grad.addColorStop(1, w.color);
+          ctx.fillStyle = grad;
+          ctx.fillRect(-w.trail, -3, w.trail, 6);
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(-14, -1.5, 16, 3);
+        } else if (w.id === 'bazooka') {
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.fillStyle = '#59606e';
+          ctx.fillRect(-12, -5, 22, 10);
+          ctx.fillStyle = w.color;
+          ctx.beginPath(); ctx.moveTo(10, -5); ctx.lineTo(18, 0); ctx.lineTo(10, 5); ctx.fill();
+          ctx.fillStyle = '#2f333d';
+          ctx.fillRect(-14, -7, 4, 14);
+        } else if (w.id === 'grenade') {
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.rotate(-ang + this.time * 6);
+          ctx.fillStyle = '#3d4a3d';
+          ctx.fillRect(-7, -7, 14, 14);
+          const blink = Math.floor((p.life + this.time) * 8) % 2 === 0;
+          ctx.fillStyle = blink ? w.color : '#1d2a1d';
+          ctx.fillRect(-3, -3, 6, 6);
+        } else {
+          // Tracer rounds: short bright streak.
+          ctx.fillStyle = w.color;
+          ctx.fillRect(-16, -1.2, 18, 2.4);
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(-4, -1.5, 6, 3);
+        }
+        ctx.restore();
+      }
+      ctx.globalCompositeOperation = 'source-over';
+    }
+
+    drawBlasts() {
+      const ctx = this.ctx;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (const b of this.blasts) {
+        const t = 1 - b.life / b.max;
+        const r = b.r * (0.4 + t * 0.8);
+        ctx.globalAlpha = (1 - t) * 0.9;
+        ctx.fillStyle = t < 0.3 ? '#fff2b0' : 'rgba(255,138,42,0.6)';
+        ctx.beginPath(); ctx.arc(b.x, b.y, r * (t < 0.3 ? 0.8 : 0.5), 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#ffb347';
+        ctx.lineWidth = 3 * (1 - t) + 1;
+        ctx.beginPath(); ctx.arc(b.x, b.y, r, 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    drawTexts() {
+      const ctx = this.ctx;
+      ctx.textAlign = 'center';
+      for (const t of this.texts) {
+        ctx.globalAlpha = Math.min(1, t.life / t.max * 2);
+        ctx.font = `${t.big ? 26 : 18}px ${DISPLAY}`;
+        ctx.fillStyle = '#05070d';
+        ctx.fillText(t.text, t.x + 2, t.y + 2);
+        ctx.fillStyle = t.color;
+        ctx.fillText(t.text, t.x, t.y);
+      }
+      ctx.globalAlpha = 1;
+      ctx.textAlign = 'left';
+    }
+
+    drawLowEnergy(f, x, y) {
+      const ctx = this.ctx;
+      ctx.font = `11px ${MONO}`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#ff5ad6';
+      ctx.fillText('EN LOW', x, y - f.h - 10);
+      ctx.textAlign = 'left';
+    }
+
+    drawKo(world) {
+      const ctx = this.ctx;
+      const winner = world.fighters[world.winner - 1];
+      ctx.fillStyle = 'rgba(5,7,13,0.45)';
+      ctx.fillRect(0, H / 2 - 70, W, 140);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#ff7a1a';
+      ctx.font = `64px ${DISPLAY}`;
+      ctx.fillText('K.O.', W / 2, H / 2 - 4);
+      ctx.fillStyle = '#e7ecf5';
+      ctx.font = `16px ${MONO}`;
+      ctx.fillText(`PLAYER ${winner.player} · ${winner.mech.code} ${winner.mech.name} WINS`, W / 2, H / 2 + 26);
+      ctx.fillStyle = '#8b95ad';
+      ctx.font = `12px ${MONO}`;
+      ctx.fillText('Enter 再來一場', W / 2, H / 2 + 50);
+      ctx.textAlign = 'left';
     }
 
     drawGuard(f, x, y) {
@@ -399,14 +627,34 @@
         ctx.textAlign = left ? 'left' : 'right';
         ctx.fillText(f.overheat ? 'OVERHEAT' : 'BOOST FUEL', left ? fuelX + fuelW + 8 : fuelX - 8, 49);
 
-        // State readout along the bottom.
-        ctx.font = `11px ${MONO}`;
-        ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        const label = `${f.state.toUpperCase()}   VX ${f.vx.toFixed(0).padStart(4)}   VY ${f.vy.toFixed(0).padStart(4)}`;
-        const tw = ctx.measureText(label).width + 16;
-        ctx.fillRect(left ? 12 : W - 12 - tw, H - 30, tw, 20);
-        ctx.fillStyle = '#e7ecf5';
-        ctx.fillText(label, left ? 20 : W - 20, H - 16);
+        // Energy for beam weapons.
+        const enFlash = f.lowEnergy > 0 && Math.floor(this.time * 10) % 2 === 0;
+        this.drawBar(fuelX, 53, fuelW, 5, f.energy / f.stats.energyMax, enFlash ? '#ff5d5d' : '#ff5ad6', !left);
+        ctx.fillStyle = enFlash ? '#ff5d5d' : '#8b95ad';
+        ctx.fillText(`ENERGY ${Math.round(f.energy)}`, left ? fuelX + fuelW + 8 : fuelX - 8, 59);
+
+        // Weapon readout along the bottom: active weapon bright, the other dim.
+        const rows = [f.weapon, f.secondary].map((w) => {
+          const active = GD.activeWeapon(f) === w;
+          let ammo = w.kind === 'melee' ? '' : w.ammo === Infinity ? '∞' : `${f.ammo[w.id]}/${w.ammo}`;
+          if (w.kind === 'projectile' && w.ammo !== Infinity && f.ammo[w.id] < w.ammo && f.sinceFire >= GD.COMBAT.reloadDelay) ammo += ' ↻';
+          return { text: `${active ? '▶ ' : '  '}${w.name} ${ammo}`.trim(), active };
+        });
+        ctx.font = `12px ${MONO}`;
+        const tw = Math.max(...rows.map((r) => ctx.measureText(r.text).width)) + 20;
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillRect(left ? 12 : W - 12 - tw, H - 48, tw, 38);
+        rows.forEach((r, i) => {
+          ctx.fillStyle = r.active ? '#e7ecf5' : '#6c778f';
+          ctx.fillText(r.text, left ? 20 : W - 20, H - 32 + i * 15);
+        });
+        // Cooldown sliver under the readout.
+        const w = GD.activeWeapon(f);
+        if (f.cooldown > 0 && w.cooldown) {
+          ctx.fillStyle = '#ff7a1a';
+          const cw = tw * Math.min(1, f.cooldown / (w.cooldown || 1));
+          ctx.fillRect(left ? 12 : W - 12 - cw, H - 11, cw, 2);
+        }
       }
 
       ctx.textAlign = 'center';
@@ -441,9 +689,18 @@
         ctx.textAlign = 'center';
         ctx.fillText(`${f.x.toFixed(0)},${f.y.toFixed(0)} fuel ${f.fuel.toFixed(0)}`, x, y - f.h - 14);
       }
+      for (const p of world.projectiles) {
+        ctx.strokeStyle = '#ff5ad6';
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.stroke();
+      }
+      for (const f of world.fighters) {
+        ctx.fillStyle = '#ffd447';
+        ctx.textAlign = f.player === 1 ? 'left' : 'right';
+        ctx.fillText(`${f.state.toUpperCase()} vx ${f.vx.toFixed(0)} vy ${f.vy.toFixed(0)} stun ${f.hitstun.toFixed(2)} dealt ${f.damageDealt}`, f.player === 1 ? 16 : W - 16, 76);
+      }
       ctx.textAlign = 'center';
       ctx.fillStyle = '#ffd447';
-      ctx.fillText(`${this.fps.toFixed(0)} FPS · ${this.particles.length} particles`, W / 2, 58);
+      ctx.fillText(`${this.fps.toFixed(0)} FPS · ${this.particles.length} particles · ${world.projectiles.length} shots`, W / 2, 58);
       ctx.textAlign = 'left';
     }
 

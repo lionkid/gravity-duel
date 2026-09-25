@@ -64,10 +64,10 @@
 <div class="wrap">
   <header>
     <div>
-      <div class="eyebrow">Build M1 · 核心物理與雙人輸入</div>
+      <div class="eyebrow">Build M2 · 武器系統</div>
       <h1>GRAVITY DUEL</h1>
     </div>
-    <p class="muted">點一下畫面後，兩位玩家就能同時用鍵盤操作。Esc 暫停。</p>
+    <p class="muted">點一下畫面後，兩位玩家就能同時用鍵盤操作。Esc 暫停，KO 後按 Enter 再來一場。</p>
   </header>
 
   <div class="toolbar">
@@ -79,10 +79,12 @@
     <div class="group">
       <label class="label" for="p1Mech">P1</label>
       <select id="p1Mech" class="p1"></select>
+      <select id="p1Weapon" class="p1" aria-label="P1 主武器"></select>
     </div>
     <div class="group">
       <label class="label" for="p2Mech">P2</label>
       <select id="p2Mech" class="p2"></select>
+      <select id="p2Weapon" class="p2" aria-label="P2 主武器"></select>
     </div>
     <div class="group">
       <button id="resetBtn">重置位置</button>
@@ -113,7 +115,8 @@
         <li>空中<b>按住跳躍鍵</b>啟動推進器滯空，燃料耗盡會過熱，要回到 30% 才能再用。</li>
         <li><b>下 + 跳躍</b>從平台往下穿。</li>
         <li><b>衝刺</b>短時間無視重力高速移動，消耗燃料。</li>
-        <li><b>防禦</b>在地面站定並展開護盾（傷害判定在 M2）。</li>
+        <li><b>防禦</b>在地面站定並展開護盾，正面來的攻擊只吃 25% 傷害。</li>
+        <li>實體彈藥會受重力下墜。<b>按住上 + 攻擊</b>抬高射角，火箭砲與榴彈才打得到中距離。</li>
       </ul>
     </div>
     <div class="note" data-help="space" hidden>
@@ -123,14 +126,27 @@
         <li><b>方向 + 跳躍鍵</b>加速推進，燃料消耗三倍。</li>
         <li><b>只按跳躍鍵</b>逆噴射煞車。</li>
         <li>撞到邊界或對手會反彈，停止推進 0.6 秒後燃料才開始回復。</li>
+        <li>所有彈藥直線飛行，火箭砲變成最強遠距武器；榴彈飛 3 秒後空爆。</li>
+        <li>擊退不會被地面摩擦吸收，中彈後會漂很遠，記得逆噴射煞車。</li>
       </ul>
     </div>
     <div class="note">
-      <h2>M1 範圍</h2>
+      <h2>武器</h2>
       <ul>
-        <li>已完成：移動、跳躍、重力、平台、衝刺、推進燃料、機體推擠、兩套鍵盤輸入。</li>
-        <li>機體的速度與推進能力值已影響手感，可以換機體比較。</li>
-        <li>攻擊與切換鍵目前只在監看面板亮燈，武器系統在 M2 接上。</li>
+        <li><b>光束步槍</b>：不受重力，每發耗 30 能量，能量不足會顯示 EN LOW。</li>
+        <li><b>火箭砲</b>：4 發、高傷害、爆風。彈速慢，可以被機槍或火神砲擊落。</li>
+        <li><b>機槍</b>：按住連射，60 發，略微下墜。</li>
+        <li><b>榴彈</b>：地球會拋物線落地爆炸，爆風也會傷到自己。</li>
+        <li><b>光束軍刀</b>：近戰，出刀瞬間有 4 幀無敵，衝刺中出刀距離更長。</li>
+        <li><b>切換鍵</b>換成頭部火神砲：48 發連射，所有機體內建。彈藥放開扳機一秒後開始回復。</li>
+      </ul>
+    </div>
+    <div class="note">
+      <h2>M2 範圍</h2>
+      <ul>
+        <li>已完成：五種主武器、火神砲、重力係數彈道、命中與爆炸、裝甲減傷、防禦、硬直與擊退、能量與彈藥、KO。</li>
+        <li>武器目前用上方下拉選單切換，M3 會做成選擇畫面與預算制。</li>
+        <li>防具、回合制與計時在 M5。</li>
       </ul>
     </div>
   </div>
@@ -139,5 +155,6 @@
 <script src="src/config.js"></script>
 <script src="src/input.js"></script>
 <script src="src/physics.js"></script>
+<script src="src/combat.js"></script>
 <script src="src/render.js"></script>
 <script src="src/main.js"></script>

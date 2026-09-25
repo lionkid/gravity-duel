@@ -24,6 +24,9 @@
       thrustSpace: 420 + mech.bst * 60,
       maxSpaceSpeed: 220 + mech.spd * 25,
       dashSpeed: 460 + mech.spd * 30,
+      energyMax: 60 + mech.en * 15,
+      energyRegen: GD.COMBAT.energyRegenBase + mech.en * GD.COMBAT.energyRegenPerPoint,
+      damageTaken: 1 - mech.arm * GD.COMBAT.armorPerPoint,
     };
   };
 
@@ -46,18 +49,29 @@
       dashT: 0, dashCd: 0, dashX: 0, dashY: 0,
       landLag: 0, coyote: 0, jumpBuf: 0, dropT: 0, regenDelay: 0,
       walkPhase: 0, landSquash: 0,
+      hitstun: 0, actionLock: 0, ko: false,
       state: 'idle',
     };
   };
 
-  GD.createWorld = function (stageId, mech1, mech2) {
+  const IDLE_INPUT = Object.freeze({ up: false, down: false, left: false, right: false, attack: false, jump: false,
+    guard: false, switch: false, dash: false, pressed: Object.freeze({}) });
+  GD.IDLE_INPUT = IDLE_INPUT;
+
+  // loadout = { 1: weaponId, 2: weaponId }
+  GD.createWorld = function (stageId, mech1, mech2, loadout) {
     const stage = GD.STAGES[stageId];
-    return {
+    const lo = loadout || { 1: 'beam', 2: 'bazooka' };
+    const world = {
       stage,
       fighters: [GD.createFighter(1, mech1, stage), GD.createFighter(2, mech2, stage)],
+      projectiles: [],
       time: 0,
+      winner: 0,
       events: [],   // consumed by the renderer for particles and sound later
     };
+    if (GD.initCombat) for (const f of world.fighters) GD.initCombat(f, lo[f.player]);
+    return world;
   };
 
   function emit(world, type, f, data) {
@@ -112,7 +126,7 @@
     if (f.onGround) f.coyote = T.coyoteTime;
 
     tryDash(world, f, inp, dir || f.facing, 0);
-    f.guarding = inp.guard && f.onGround && f.dashT <= 0;
+    f.guarding = inp.guard && f.onGround && f.dashT <= 0 && f.actionLock <= 0;
 
     let jumped = false;
     if (f.dashT > 0) {
@@ -122,9 +136,11 @@
       f.vy = 0;
       f.boosting = false;
     } else {
-      const locked = f.guarding || f.landLag > 0;
+      const locked = f.guarding || f.landLag > 0 || f.actionLock > 0;
       const target = locked ? 0 : dir * (f.onGround ? f.stats.walkSpeed : f.stats.airSpeed);
-      f.vx = approach(f.vx, target, (f.onGround ? T.groundAccel : T.airAccel) * dt);
+      // Knockback should carry: much less friction while stunned.
+      const friction = f.hitstun > 0 ? GD.COMBAT.hitstunFriction : 1;
+      f.vx = approach(f.vx, target, (f.onGround ? T.groundAccel : T.airAccel) * friction * dt);
 
       if (f.jumpBuf > 0 && f.coyote > 0 && !locked) {
         f.jumpBuf = 0;
@@ -205,7 +221,7 @@
     if (len) { dx /= len; dy /= len; }
 
     tryDash(world, f, inp, len ? dx : f.facing, len ? dy : 0);
-    f.guarding = inp.guard && f.dashT <= 0;
+    f.guarding = inp.guard && f.dashT <= 0 && f.actionLock <= 0;
     f.thrusting = false;
     f.boosting = false;
 
@@ -274,6 +290,10 @@
     f.dropT = Math.max(0, f.dropT - dt);
     f.regenDelay = Math.max(0, f.regenDelay - dt);
     f.landSquash = Math.max(0, f.landSquash - dt * 6);
+    f.hitstun = Math.max(0, f.hitstun - dt);
+    f.actionLock = Math.max(0, f.actionLock - dt);
+    // A stunned or downed fighter ignores the controls but still obeys physics.
+    if (f.hitstun > 0 || f.ko) inp = IDLE_INPUT;
     if (inp.pressed.jump) f.jumpBuf = T.jumpBuffer;
 
     if (world.stage.gravity > 0) updateEarth(world, f, inp, dt);
@@ -324,6 +344,9 @@
   }
 
   function stateOf(world, f) {
+    if (f.ko) return 'down';
+    if (f.hitstun > 0) return 'hit';
+    if (f.melee) return 'attack';
     if (f.dashT > 0) return 'dash';
     if (f.guarding) return 'guard';
     if (f.landLag > 0) return 'land';
@@ -343,9 +366,11 @@
     updateFighter(world, b, inputs[1], dt);
     resolveFighters(world, a, b);
     for (const [f, o] of [[a, b], [b, a]]) {
-      if (f.dashT <= 0 && Math.abs(o.x - f.x) > 2) f.facing = o.x > f.x ? 1 : -1;
-      f.state = stateOf(world, f);
+      const busy = f.dashT > 0 || f.melee || f.hitstun > 0 || f.ko;
+      if (!busy && Math.abs(o.x - f.x) > 2) f.facing = o.x > f.x ? 1 : -1;
     }
+    if (GD.stepCombat) GD.stepCombat(world, inputs, dt);
+    for (const f of world.fighters) f.state = stateOf(world, f);
     world.time += dt;
   };
 

@@ -9,6 +9,7 @@
   const app = {
     stageId: 'earth',
     mechs: { 1: 'ax01', 2: 'zr06' },
+    weapons: { 1: 'beam', 2: 'bazooka' },
     paused: false,
     focusLost: false,
     debug: false,
@@ -16,7 +17,7 @@
   };
 
   function newWorld() {
-    app.world = GD.createWorld(app.stageId, app.mechs[1], app.mechs[2]);
+    app.world = GD.createWorld(app.stageId, app.mechs[1], app.mechs[2], app.weapons);
     renderer.setStage(app.world.stage);
     input.clear();
   }
@@ -42,7 +43,7 @@
     if (app.focusLost) return;
     if (code === 'Escape') setPaused(!app.paused);
     else if (code === 'Backquote') toggleDebug();
-    else if (app.paused && code === 'Enter') { newWorld(); setPaused(false); }
+    else if ((app.paused || app.world.winner) && code === 'Enter') { newWorld(); setPaused(false); }
     else if (app.paused && code === 'Digit1') { setStage('earth'); setPaused(false); }
     else if (app.paused && code === 'Digit2') { setStage('space'); setPaused(false); }
   };
@@ -64,6 +65,10 @@
     sel.innerHTML = GD.MECHS.map((m) => `<option value="${m.id}">${m.code} ${m.name} · ${m.role}</option>`).join('');
     sel.value = app.mechs[p];
     sel.addEventListener('change', () => { app.mechs[p] = sel.value; newWorld(); release(sel); });
+    const wsel = document.getElementById(`p${p}Weapon`);
+    wsel.innerHTML = GD.WEAPONS.map((w) => `<option value="${w.id}">${w.name} · ${w.zh}</option>`).join('');
+    wsel.value = app.weapons[p];
+    wsel.addEventListener('change', () => { app.weapons[p] = wsel.value; newWorld(); release(wsel); });
   }
 
   // ---- Input monitor: shows which actions each player is holding ----
