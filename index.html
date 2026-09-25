@@ -1,0 +1,143 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gravity Duel</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Russo+One&family=Noto+Sans+TC:wght@400;500;700&family=Share+Tech+Mono&display=swap">
+<style>
+  /* Single dark cockpit look, chosen on purpose for an arcade game. */
+  :root {
+    color-scheme: dark;
+    --bg: #0a0e17; --bg-2: #111827; --panel: #161e30; --line: #2a3654;
+    --text: #e7ecf5; --muted: #8b95ad; --accent: #ff7a1a; --accent-2: #35c7e8;
+    --p1: #e8453c; --p2: #3a7bff;
+    --display: "Russo One", "Noto Sans TC", sans-serif;
+    --body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    --mono: "Share Tech Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { background: var(--bg); color: var(--text); }
+  body { margin: 0; font-family: var(--body); font-size: 14px; line-height: 1.55; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding-block: 20px 48px; padding-inline: 16px; display: grid; gap: 14px; }
+  header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 8px 24px; }
+  h1 { font-family: var(--display); font-weight: 400; font-size: 30px; margin: 0; letter-spacing: 0.03em; line-height: 1.1; }
+  h2 { font-family: var(--display); font-weight: 400; font-size: 14px; margin: 0; letter-spacing: 0.06em; }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); }
+  .muted { color: var(--muted); }
+
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+  .group { display: flex; gap: 6px; align-items: center; }
+  .group > .label { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  button, select {
+    font-family: var(--mono); font-size: 13px; color: var(--text); background: var(--bg-2);
+    border: 1px solid var(--line); border-radius: 3px; padding: 6px 10px; cursor: pointer;
+  }
+  button:hover, select:hover { border-color: var(--accent-2); }
+  button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #0a0e17; }
+  button:focus-visible, select:focus-visible, canvas:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+  select.p1 { border-top: 2px solid var(--p1); }
+  select.p2 { border-top: 2px solid var(--p2); }
+
+  .frame { position: relative; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: #05070d;
+    box-shadow: 0 0 0 5px #0d1220; }
+  canvas { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; max-width: 100%; outline: none; }
+
+  .monitor { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 720px) { .monitor { grid-template-columns: 1fr; } }
+  .side { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 10px 12px; display: grid; gap: 8px; }
+  .side.p1 { border-top: 3px solid var(--p1); } .side.p2 { border-top: 3px solid var(--p2); }
+  .side.p1 h2 { color: var(--p1); } .side.p2 h2 { color: var(--p2); }
+  .chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; }
+  .chip { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 4px 8px;
+    border: 1px solid var(--line); border-radius: 3px; background: var(--bg-2); font-size: 12px; transition: background 60ms, border-color 60ms; }
+  .chip.on { background: rgba(255,122,26,0.22); border-color: var(--accent); }
+  .keys { display: flex; gap: 3px; }
+  kbd { font-family: var(--mono); font-size: 11px; background: #1d2740; border: 1px solid var(--line); border-bottom-width: 2px;
+    border-radius: 3px; padding: 0 5px; min-width: 20px; text-align: center; color: var(--text); }
+
+  .notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px 24px; }
+  .note { border-left: 2px solid var(--line); padding-left: 12px; display: grid; gap: 6px; align-content: start; }
+  .note ul { margin: 0; padding-left: 18px; color: var(--muted); }
+  .note li b { color: var(--text); font-weight: 500; }
+  @media (prefers-reduced-motion: reduce) { .chip { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <div class="eyebrow">Build M1 · 核心物理與雙人輸入</div>
+      <h1>GRAVITY DUEL</h1>
+    </div>
+    <p class="muted">點一下畫面後，兩位玩家就能同時用鍵盤操作。Esc 暫停。</p>
+  </header>
+
+  <div class="toolbar">
+    <div class="group" role="group" aria-label="場景">
+      <span class="label">場景</span>
+      <button data-stage="earth" aria-pressed="true">EARTH 1.0 G</button>
+      <button data-stage="space" aria-pressed="false">SPACE 0 G</button>
+    </div>
+    <div class="group">
+      <label class="label" for="p1Mech">P1</label>
+      <select id="p1Mech" class="p1"></select>
+    </div>
+    <div class="group">
+      <label class="label" for="p2Mech">P2</label>
+      <select id="p2Mech" class="p2"></select>
+    </div>
+    <div class="group">
+      <button id="resetBtn">重置位置</button>
+      <button id="debugBtn" aria-pressed="false">除錯資訊 `</button>
+    </div>
+  </div>
+
+  <div class="frame">
+    <canvas id="game" tabindex="0" aria-label="遊戲畫面"></canvas>
+  </div>
+
+  <div class="monitor">
+    <div class="side p1">
+      <h2>PLAYER 1 · 按鍵監看</h2>
+      <div class="chips" id="monitor1"></div>
+    </div>
+    <div class="side p2">
+      <h2>PLAYER 2 · 按鍵監看</h2>
+      <div class="chips" id="monitor2"></div>
+    </div>
+  </div>
+
+  <div class="notes">
+    <div class="note" data-help="earth">
+      <h2>地球操作</h2>
+      <ul>
+        <li><b>左右</b>走動，<b>跳躍鍵</b>起跳。</li>
+        <li>空中<b>按住跳躍鍵</b>啟動推進器滯空，燃料耗盡會過熱，要回到 30% 才能再用。</li>
+        <li><b>下 + 跳躍</b>從平台往下穿。</li>
+        <li><b>衝刺</b>短時間無視重力高速移動，消耗燃料。</li>
+        <li><b>防禦</b>在地面站定並展開護盾（傷害判定在 M2）。</li>
+      </ul>
+    </div>
+    <div class="note" data-help="space" hidden>
+      <h2>太空操作</h2>
+      <ul>
+        <li><b>上下左右</b>全方向推進，放開後會保留慣性持續漂移。</li>
+        <li><b>方向 + 跳躍鍵</b>加速推進，燃料消耗三倍。</li>
+        <li><b>只按跳躍鍵</b>逆噴射煞車。</li>
+        <li>撞到邊界或對手會反彈，停止推進 0.6 秒後燃料才開始回復。</li>
+      </ul>
+    </div>
+    <div class="note">
+      <h2>M1 範圍</h2>
+      <ul>
+        <li>已完成：移動、跳躍、重力、平台、衝刺、推進燃料、機體推擠、兩套鍵盤輸入。</li>
+        <li>機體的速度與推進能力值已影響手感，可以換機體比較。</li>
+        <li>攻擊與切換鍵目前只在監看面板亮燈，武器系統在 M2 接上。</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script src="src/config.js"></script>
+<script src="src/input.js"></script>
+<script src="src/physics.js"></script>
+<script src="src/render.js"></script>
+<script src="src/main.js"></script>
