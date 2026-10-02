@@ -34,6 +34,11 @@
 
 傷害 × (1 − 裝甲 × 0.06)。正面防禦只吃 25% 傷害、不硬直。太空的擊退是加速度而非設定速度，會漂得更遠。
 
+## 2.5D 原型
+
+`prototype-2.5d.html` 用同一套物理與武器，換成透視鏡頭與立體方塊機體（`src/render3d.js`，無外部套件）。
+戰鬥仍在同一個平面上，屬於視覺 2.5D。尚未成為正式 renderer，`index.html` 仍是 2D 版。
+
 ## 專案結構
 
 - `src/config.js`：機體、場景、手感參數、按鍵配置。調平衡只改這裡。
@@ -41,6 +46,7 @@
 - `src/physics.js`：固定 60 Hz 物理，不碰 DOM，可以在 Node 測試。
 - `src/combat.js`：武器、彈道、爆炸、命中、擊退、KO。同樣不碰 DOM。
 - `src/render.js`：Canvas 繪圖、粒子、HUD。
+- `src/render3d.js`：2.5D renderer，繼承 2D 版，方塊機體與透視鏡頭（原型）。
 - `src/main.js`：主迴圈、暫停、失焦處理、頁面控制。
 - `tests/physics.test.js`、`tests/combat.test.js`：`node tests/physics.test.js && node tests/combat.test.js`
 

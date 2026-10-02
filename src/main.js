@@ -3,7 +3,9 @@
   'use strict';
 
   const canvas = document.getElementById('game');
-  const renderer = new GD.Renderer(canvas);
+  // The 2.5D renderer is used when its script is loaded; the 2D one otherwise.
+  const renderer = new (GD.Renderer3D || GD.Renderer)(canvas);
+  GD.renderer = renderer;
   const input = new GD.Input(GD.BINDINGS, window);
 
   const app = {
@@ -75,6 +77,7 @@
   const monitorCells = [];
   for (const p of [1, 2]) {
     const root = document.getElementById(`monitor${p}`);
+    if (!root) continue;   // pages without the key monitor panel
     root.innerHTML = GD.ACTIONS.map((a) => {
       const keys = GD.BINDINGS[p][a.id].map((c) => `<kbd>${GD.keyLabel(c)}</kbd>`).join('');
       return `<div class="chip" data-p="${p}" data-a="${a.id}"><span>${a.label}</span><span class="keys">${keys}</span></div>`;
