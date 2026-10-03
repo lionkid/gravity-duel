@@ -47,21 +47,23 @@
       boosting: false, thrusting: false, thrustX: 0, thrustY: 0,
       guarding: false,
       dashT: 0, dashCd: 0, dashX: 0, dashY: 0,
-      landLag: 0, coyote: 0, jumpBuf: 0, dropT: 0, regenDelay: 0,
+      landLag: 0, coyote: 0, jumpBuf: 0, dropT: 0, regenDelay: 0, downHold: 0,
       walkPhase: 0, landSquash: 0,
       hitstun: 0, actionLock: 0, ko: false,
       state: 'idle',
     };
   };
 
-  const IDLE_INPUT = Object.freeze({ up: false, down: false, left: false, right: false, attack: false, jump: false,
+  const IDLE_INPUT = Object.freeze({ up: false, down: false, left: false, right: false, attack: false, sub: false,
     guard: false, switch: false, dash: false, pressed: Object.freeze({}) });
   GD.IDLE_INPUT = IDLE_INPUT;
 
-  // loadout = { 1: weaponId, 2: weaponId }
+  GD.DEFAULT_LOADOUT = { 1: { ranged: 'beam', melee: 'saber' }, 2: { ranged: 'bazooka', melee: 'axe' } };
+
+  // loadout = { 1: { ranged, melee }, 2: { ranged, melee } }
   GD.createWorld = function (stageId, mech1, mech2, loadout) {
     const stage = GD.STAGES[stageId];
-    const lo = loadout || { 1: 'beam', 2: 'bazooka' };
+    const lo = loadout || GD.DEFAULT_LOADOUT;
     const world = {
       stage,
       fighters: [GD.createFighter(1, mech1, stage), GD.createFighter(2, mech2, stage)],
@@ -142,27 +144,36 @@
       const friction = f.hitstun > 0 ? GD.COMBAT.hitstunFriction : 1;
       f.vx = approach(f.vx, target, (f.onGround ? T.groundAccel : T.airAccel) * friction * dt);
 
-      if (f.jumpBuf > 0 && f.coyote > 0 && !locked) {
-        f.jumpBuf = 0;
-        f.coyote = 0;
-        if (inp.down && f.groundRef && f.groundRef !== 'ground') {
-          // Down + jump drops through a one-way platform.
+      // Holding down on a one-way platform drops through it. Firing or using the vulcan
+      // while holding down aims downward instead, so it does not count.
+      const onPlatform = f.onGround && f.groundRef && f.groundRef !== 'ground';
+      if (onPlatform && inp.down && !inp.attack && !inp.sub && !locked) {
+        f.downHold += dt;
+        if (f.downHold >= T.dropHoldTime) {
+          f.downHold = 0;
           f.dropT = T.dropThroughTime;
           f.onGround = false;
           f.y += 1;
-        } else {
-          f.vy = -f.stats.jumpVel;
-          f.onGround = false;
-          jumped = true;
-          emit(world, 'jump', f);
         }
+      } else {
+        f.downHold = 0;
       }
 
-      // Booster latch: once engaged it stays on until jump is released or fuel runs out.
-      const canBoost = !f.onGround && inp.jump && !f.overheat && f.fuel > 0;
+      // Up jumps from the ground; holding it in the air fires the jet.
+      if (f.jumpBuf > 0 && f.coyote > 0 && !locked) {
+        f.jumpBuf = 0;
+        f.coyote = 0;
+        f.vy = -f.stats.jumpVel;
+        f.onGround = false;
+        jumped = true;
+        emit(world, 'jump', f);
+      }
+
+      // Jet latch: once engaged it stays on until up is released or fuel runs out.
+      const canBoost = !f.onGround && inp.up && !f.overheat && f.fuel > 0;
       if (!canBoost) {
         f.boosting = false;
-      } else if (!f.boosting && (f.vy > T.boostStartVy || (inp.pressed.jump && !jumped))) {
+      } else if (!f.boosting && (f.vy > T.boostStartVy || (inp.pressed.up && !jumped))) {
         f.boosting = true;
       }
 
@@ -230,20 +241,19 @@
       f.vx = f.dashX * f.stats.dashSpeed;
       f.vy = f.dashY * f.stats.dashSpeed;
     } else {
-      const canThrust = !f.overheat && f.fuel > 0 && !f.guarding;
-      if (canThrust && len) {
-        const boost = inp.jump;
-        const acc = f.stats.thrustSpace * (boost ? S.boostMul : 1);
+      const fuelOk = !f.overheat && f.fuel > 0;
+      if (fuelOk && len && !f.guarding) {
+        // Every direction is a jet direction in zero G.
+        const acc = f.stats.thrustSpace;
         f.vx += dx * acc * dt;
         f.vy += dy * acc * dt;
         f.thrusting = true;
-        f.boosting = boost;
         f.thrustX = dx;
         f.thrustY = dy;
         f.regenDelay = T.spaceRegenDelay;
-        spendFuel(world, f, (boost ? S.boostCost : S.thrustCost) * dt);
-      } else if (canThrust && inp.jump) {
-        // Jump without a direction fires retro thrusters to brake.
+        spendFuel(world, f, S.thrustCost * dt);
+      } else if (fuelOk && f.guarding) {
+        // Guarding braces the frame: retro thrusters bleed off momentum.
         const sp = Math.hypot(f.vx, f.vy);
         if (sp > 1) {
           const ns = Math.max(0, sp - S.brakeDecel * dt);
@@ -261,7 +271,7 @@
       f.vx *= k;
       f.vy *= k;
       const sp = Math.hypot(f.vx, f.vy);
-      const max = f.stats.maxSpaceSpeed * (f.boosting ? 1.35 : 1);
+      const max = f.stats.maxSpaceSpeed;
       if (sp > max) {
         const ns = sp - (sp - max) * Math.min(1, S.overspeedDrag * dt);
         f.vx *= ns / sp;
@@ -294,7 +304,7 @@
     f.actionLock = Math.max(0, f.actionLock - dt);
     // A stunned or downed fighter ignores the controls but still obeys physics.
     if (f.hitstun > 0 || f.ko) inp = IDLE_INPUT;
-    if (inp.pressed.jump) f.jumpBuf = T.jumpBuffer;
+    if (inp.pressed.up) f.jumpBuf = T.jumpBuffer;
 
     if (world.stage.gravity > 0) updateEarth(world, f, inp, dt);
     else updateSpace(world, f, inp, dt);
@@ -355,7 +365,7 @@
       if (f.boosting) return 'boost';
       return f.vy < 0 ? 'rise' : 'fall';
     }
-    if (f.thrusting) return f.boosting ? 'boost' : 'thrust';
+    if (f.thrusting) return 'thrust';
     return 'drift';
   }
 

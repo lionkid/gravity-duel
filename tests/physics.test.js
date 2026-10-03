@@ -5,7 +5,7 @@ require('../src/physics.js');
 const GD = globalThis.GD;
 const assert = require('assert');
 
-const idle = () => ({ up: false, down: false, left: false, right: false, attack: false, jump: false, guard: false, switch: false, dash: false, pressed: {} });
+const idle = () => ({ up: false, down: false, left: false, right: false, attack: false, sub: false, guard: false, switch: false, dash: false, pressed: {} });
 function run(world, frames, make1, make2) {
   for (let i = 0; i < frames; i++) {
     GD.stepWorld(world, [make1 ? make1(i) : idle(), make2 ? make2(i) : idle()], GD.DT);
@@ -21,12 +21,12 @@ test('fighter rests on the ground on Earth', () => {
   assert.ok(w.fighters[0].onGround);
 });
 
-test('tap jump reaches a sensible apex and lands again', () => {
+test('tapping up jumps to a sensible apex and lands again', () => {
   const w = GD.createWorld('earth', 'ax01', 'zr06');
   const f = w.fighters[0];
   let minY = Infinity, landedAt = -1;
   for (let i = 0; i < 180; i++) {
-    const inp = idle(); if (i === 0) { inp.jump = true; inp.pressed = { jump: true }; }
+    const inp = idle(); if (i === 0) { inp.up = true; inp.pressed = { up: true }; }
     GD.stepWorld(w, [inp, idle()], GD.DT);
     minY = Math.min(minY, f.y);
     if (i > 2 && f.onGround && landedAt < 0) landedAt = i;
@@ -36,12 +36,12 @@ test('tap jump reaches a sensible apex and lands again', () => {
   assert.ok(landedAt > 40 && landedAt < 80, 'landed at frame ' + landedAt);
 });
 
-test('holding jump engages booster, spends fuel, then overheats', () => {
+test('holding up engages the jet, spends fuel, then overheats', () => {
   const w = GD.createWorld('earth', 'ax01', 'zr06');
   const f = w.fighters[0];
   let boosted = false, overheated = false;
   for (let i = 0; i < 600; i++) {
-    const inp = idle(); inp.jump = true; if (i === 0) inp.pressed = { jump: true };
+    const inp = idle(); inp.up = true; if (i === 0) inp.pressed = { up: true };
     GD.stepWorld(w, [inp, idle()], GD.DT);
     if (f.boosting) boosted = true;
     if (f.overheat) { overheated = true; break; }
@@ -60,12 +60,15 @@ test('walking into a platform from below does not snag, landing on it works', ()
   assert.strictEqual(f.groundRef, p);
 });
 
-test('down + jump drops through a platform', () => {
+test('holding down drops through a platform, a tap does not', () => {
   const w = GD.createWorld('earth', 'ax01', 'zr06');
   const f = w.fighters[0];
   const p = w.stage.platforms[0];
   f.x = p.x + p.w / 2; f.y = p.y; f.prevY = f.y; f.onGround = true; f.groundRef = p;
-  run(w, 90, (i) => { const inp = idle(); if (i === 1) { inp.down = true; inp.jump = true; inp.pressed = { jump: true }; } return inp; });
+  run(w, 6, () => Object.assign(idle(), { down: true }));    // 0.1 s tap
+  run(w, 30);
+  assert.strictEqual(f.y, p.y, 'a short tap should not drop');
+  run(w, 90, (i) => Object.assign(idle(), { down: i < 20 }));
   assert.strictEqual(f.y, GD.ARENA.groundY);
 });
 
@@ -120,11 +123,11 @@ test('space: thrust builds momentum that keeps drifting after release', () => {
   assert.ok(f.vx > vAfterThrust * 0.8, 'drift decayed too fast: ' + f.vx);
 });
 
-test('space: jump without direction brakes to a stop', () => {
+test('space: guarding fires retro thrusters and brakes to a stop', () => {
   const w = GD.createWorld('space', 'ax01', 'zr06');
   const f = w.fighters[0];
   run(w, 30, () => Object.assign(idle(), { down: true }));
-  run(w, 40, () => Object.assign(idle(), { jump: true }));
+  run(w, 40, () => Object.assign(idle(), { guard: true }));
   assert.ok(Math.hypot(f.vx, f.vy) < 1, 'still moving ' + Math.hypot(f.vx, f.vy));
 });
 
@@ -148,6 +151,15 @@ test('space: overheated booster cannot thrust until fuel recovers', () => {
 
 test('stats keep the 20-point balance rule', () => {
   for (const m of GD.MECHS) assert.strictEqual(m.hp + m.spd + m.arm + m.en + m.bst, 20, m.id);
+});
+
+test('aiming down from a platform does not drop through it', () => {
+  const w = GD.createWorld('earth', 'ax01', 'zr06');
+  const f = w.fighters[0];
+  const p = w.stage.platforms[0];
+  f.x = p.x + p.w / 2; f.y = p.y; f.prevY = f.y; f.onGround = true; f.groundRef = p;
+  run(w, 40, () => Object.assign(idle(), { down: true, attack: true }));
+  assert.strictEqual(f.y, p.y);
 });
 
 console.log(`\n${passed} tests passed`);

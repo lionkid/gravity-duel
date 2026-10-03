@@ -219,7 +219,19 @@
       const botY = GY - Math.max(ay, by);
       const spread = topY - botY;
       let tYaw, tPitch, tDist, tTarget;
-      if (cam.mode === 'side') {
+      if (cam.mode === 'showcase') {
+        // Character and loadout screens: close two-shot that slowly sways.
+        tYaw = Math.sin(this.time * 0.35) * 0.4;
+        tPitch = 0.1;
+        tDist = 360;
+        tTarget = [midX, botY + 52, 0];
+      } else if (cam.mode === 'title') {
+        // Title: the pair sits right of center, leaving the left side for the logo and menu.
+        tYaw = Math.sin(this.time * 0.15) * 0.45;
+        tPitch = 0.12;
+        tDist = 520;
+        tTarget = [midX - 150, botY + 70, 0];
+      } else if (cam.mode === 'side') {
         // 1:1 with the 2D build: f / dist = 1, so world X maps to screen X exactly on the fight plane.
         tYaw = 0; tPitch = 0; tDist = 900; tTarget = [0, GY - H / 2, 0];
       } else if (cam.mode === 'free') {
@@ -237,7 +249,7 @@
           const k = Math.min(1, this.koT / 1.2);
           tTarget = [lerp(tTarget[0], wx, k), lerp(tTarget[1], wy, k), 0];
           tDist = lerp(tDist, 460, k);
-          tYaw += Math.min(0.6, this.koT * 0.2) * w.facing;
+          tYaw += Math.min(0.32, this.koT * 0.15) * w.facing;
           tPitch = lerp(tPitch, 0.17, k);
         }
       }
@@ -349,7 +361,7 @@
 
       for (const b of this.scene.boxes) this.addBox(b, null, [0, 0, 0], { fogged: true });
       for (const a of this.scene.asteroids) this.addBox(a, null, [0, 0, 0], { fogged: true });
-      this.addPlatforms();
+      if (!opts.showcase) this.addPlatforms();
 
       for (const gh of this.ghosts) this.drawMech(gh.f, gh.x, gh.y, gh.facing, '#7fe3ff', { alpha: (gh.life / gh.max) * 0.45 });
       for (const f of world.fighters) {
@@ -366,8 +378,9 @@
       for (const f of world.fighters) if (f.lowEnergy > 0) this.drawLowEnergy(f, lerp(f.prevX, f.x, alpha), lerp(f.prevY, f.y, alpha));
 
       ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      if (opts.showcase || opts.noHud) return;
       this.drawHud(world);
-      this.drawCameraTag();
+      if (opts.debug) this.drawCameraTag();
       if (world.winner) this.drawKo(world);
       if (opts.debug) this.drawDebug(world, alpha);
       if (opts.paused) this.drawPause(opts);
@@ -375,7 +388,7 @@
 
     drawCameraTag() {
       const ctx = this.ctx;
-      const label = { duel: 'CAM · DUEL', side: 'CAM · SIDE 2D', free: 'CAM · FREE' }[this.cam.mode];
+      const label = { duel: 'CAM · DUEL', side: 'CAM · SIDE 2D', free: 'CAM · FREE', showcase: 'CAM · SHOWCASE', title: 'CAM · TITLE' }[this.cam.mode];
       ctx.font = `10px ${MONO}`;
       ctx.textAlign = 'center';
       ctx.fillStyle = '#8b95ad';
@@ -589,7 +602,7 @@
       if (airborne) { legA = -0.2; legB = -0.45; armB = -0.3; }
       if (st === 'dash') { legA = 0.5; legB = -0.6; armB = -0.8; }
       if (st === 'down') { legA = 0.25; legB = -0.1; }
-      const w = f.weapon ? GD.activeWeapon(f) : null;
+      const w = f.ranged ? GD.activeWeapon(f) : null;
       const ranged = !!(w && w.kind === 'projectile');
       const recoil = (f.recoil || 0) * 5;
       const aim = -(f.lastAim || 0) * Math.PI / 180;
@@ -617,26 +630,58 @@
         parts.push({ p: [22, 48, zA * 0.85], s: [3, 58, 30], c: '#9aa3b8' });
       } else if (f.melee) {
         const mm = f.melee, mw = mm.w;
-        const ph = mm.t < mw.windup ? mm.t / mw.windup : 1 + Math.min(1, (mm.t - mw.windup) / mw.active);
-        const ang = ph <= 1 ? 2.7 - ph * 1.1 : 1.6 - (ph - 1) * 0.9;     // raise, then slash down and forward
-        parts.push({ p: [1, 51, zA], s: [10, 24, 10], c: col, pivot: [0, 63, zA], rz: ang });
-        parts.push({ p: [0, 34, zA], s: [5, 10, 5], c: metal, pivot: [0, 63, zA], rz: ang });
-        parts.push({ p: [0, 29 - mm.range / 2, zA], s: [4, mm.range, 4], c: '#ffd7a8', glow: true, add: true, pivot: [0, 63, zA], rz: ang });
+        const wind = mm.t < mw.windup;
+        const p = wind ? mm.t / mw.windup : Math.min(1, (mm.t - mw.windup) / mw.active);
+        const piv = [0, 63, zA];
+        if (mw.style === 'lance') {
+          // Thrust: arm level, the lance slides forward along the arm axis.
+          const ang = wind ? 1.57 - 0.25 * p : 1.32 + 0.25 * p;
+          const d = wind ? -8 * p : -8 + 34 * p;
+          const beam = mm.range * 0.6;
+          parts.push({ p: [1, 51, zA], s: [10, 24, 10], c: col, pivot: piv, rz: ang });
+          parts.push({ p: [0, 28 - d, zA], s: [4, 44, 4], c: metal, pivot: piv, rz: ang });
+          parts.push({ p: [0, 6 - d - beam / 2, zA], s: [3, beam, 3], c: '#c8f3ff', glow: true, add: true, pivot: piv, rz: ang });
+        } else if (mw.style === 'axe') {
+          // Overhead chop: wind far back, then a long arc down in front.
+          const ang = wind ? 2.9 + 0.3 * p : 3.2 - 2.6 * p;
+          parts.push({ p: [1, 51, zA], s: [10, 24, 10], c: col, pivot: piv, rz: ang });
+          parts.push({ p: [0, 24, zA], s: [4, 32, 4], c: metal, pivot: piv, rz: ang });
+          parts.push({ p: [-5, 12, zA], s: [14, 18, 6], c: '#7a3328', pivot: piv, rz: ang });
+          parts.push({ p: [-12.5, 12, zA], s: [2, 18, 6], c: '#ff6a3a', glow: true, add: !wind, pivot: piv, rz: ang });
+        } else {
+          const ph = wind ? p : 1 + p;
+          const ang = ph <= 1 ? 2.7 - ph * 1.1 : 1.6 - (ph - 1) * 0.9;     // raise, then slash down and forward
+          parts.push({ p: [1, 51, zA], s: [10, 24, 10], c: col, pivot: piv, rz: ang });
+          parts.push({ p: [0, 34, zA], s: [5, 10, 5], c: metal, pivot: piv, rz: ang });
+          parts.push({ p: [0, 29 - mm.range / 2, zA], s: [4, mm.range, 4], c: '#ffd7a8', glow: true, add: true, pivot: piv, rz: ang });
+        }
       } else if (ranged && w.id === 'bazooka') {
         parts.push({ p: [1, 51, zA], s: [10, 24, 10], c: col, pivot: [0, 63, zA], rz: 0.6 + armA * 0.3 });
         parts.push({ p: [10 - recoil, 73, zA], s: [50, 10, 10], c: metal, pivot: [-6, 73, zA], rz: aim * 0.7 });
         parts.push({ p: [-16 - recoil, 73, zA], s: [6, 13, 13], c: metalDark, pivot: [-6, 73, zA], rz: aim * 0.7 });
-      } else if (ranged && w.id !== 'vulcan') {
+      } else if (ranged) {
         parts.push({ p: [1, 51, zA], s: [10, 24, 10], c: col, pivot: [0, 63, zA], rz: 1.25 });
-        const len = w.id === 'grenade' ? 10 : 34;
+        const len = w.id === 'grenade' ? 12 : 34;
         parts.push({ p: [22 + len / 2 - 4 - recoil, 55, zA], s: [len, 6, 6], c: w.id === 'grenade' ? '#3d4a3d' : metal, pivot: [22, 55, zA], rz: aim });
         if (w.id !== 'grenade') parts.push({ p: [22 + len - 4 - recoil, 55, zA], s: [5, 8, 8], c: w.color, glow: true, pivot: [22, 55, zA], rz: aim });
       } else {
-        parts.push({ p: [1, 51, zA], s: [10, 24, 10], c: col, pivot: [0, 63, zA], rz: armA });
-        if (w && w.id === 'vulcan') {
-          parts.push({ p: [6, 83, 5], s: [6, 3, 3], c: '#ffe066', glow: true }, { p: [6, 83, -5], s: [6, 3, 3], c: '#ffe066', glow: true });
+        // Melee weapon at rest in the front hand.
+        const piv = [0, 63, zA];
+        const rest = w && w.style === 'lance' ? 0.9 : armA;
+        parts.push({ p: [1, 51, zA], s: [10, 24, 10], c: col, pivot: piv, rz: rest });
+        if (w && w.style === 'axe') {
+          parts.push({ p: [0, 26, zA], s: [4, 30, 4], c: metal, pivot: piv, rz: rest });
+          parts.push({ p: [-5, 14, zA], s: [14, 14, 6], c: '#7a3328', pivot: piv, rz: rest });
+        } else if (w && w.style === 'lance') {
+          parts.push({ p: [0, 12, zA], s: [4, 76, 4], c: metal, pivot: piv, rz: rest });
+          parts.push({ p: [0, -29, zA], s: [6, 8, 6], c: w.color, glow: true, pivot: piv, rz: rest });
+        } else if (w) {
+          parts.push({ p: [0, 35, zA], s: [4, 10, 4], c: metal, pivot: piv, rz: rest });
+          parts.push({ p: [0, 29.5, zA], s: [5, 2, 5], c: w.color, glow: true, pivot: piv, rz: rest });
         }
-        if (w && w.kind === 'melee') parts.push({ p: [-4, 40, 22 * side], s: [4, 14, 4], c: metal });
+      }
+      if (f.subFlash > 0) {
+        parts.push({ p: [10, 81, 5], s: [6, 4, 4], c: '#fff3a8', glow: true, add: true }, { p: [10, 81, -5], s: [6, 4, 4], c: '#fff3a8', glow: true, add: true });
       }
       return parts;
     }

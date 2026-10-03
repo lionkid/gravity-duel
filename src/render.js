@@ -292,6 +292,7 @@
 
     draw(world, alpha, opts) {
       const ctx = this.ctx;
+      if (opts.showcase) { this.drawShowcase(world, alpha, opts); return; }
       ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
       if (this.shake > 0.5 && !opts.paused) {
         ctx.translate((Math.random() - 0.5) * this.shake, (Math.random() - 0.5) * this.shake);
@@ -322,10 +323,40 @@
       this.drawParticles();
       this.drawTexts();
       ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      if (opts.noHud) return;
       this.drawHud(world);
       if (world.winner) this.drawKo(world);
       if (opts.debug) this.drawDebug(world, alpha);
       if (opts.paused) this.drawPause(opts);
+    }
+
+    // Menu backdrop: the arena dimmed, with both frames enlarged side by side.
+    drawShowcase(world, alpha, opts) {
+      const ctx = this.ctx;
+      ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+      ctx.drawImage(this.bg, 0, 0, W, H);
+      const g = ctx.createLinearGradient(0, 0, 0, H);
+      g.addColorStop(0, 'rgba(5,7,13,0.7)');
+      g.addColorStop(1, 'rgba(5,7,13,0.35)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+      const fs = world.fighters;
+      const pos = fs.map((f) => ({ x: f.prevX + (f.x - f.prevX) * alpha, y: f.prevY + (f.y - f.prevY) * alpha }));
+      const midX = (pos[0].x + pos[1].x) / 2;
+      const footY = Math.max(pos[0].y, pos[1].y);
+      const scale = opts.scale || 2.2;
+      ctx.save();
+      ctx.translate(W / 2 + (opts.offsetX || 0), H - 70);
+      ctx.scale(scale, scale);
+      ctx.translate(-midX, -footY);
+      fs.forEach((f, i) => {
+        ctx.fillStyle = 'rgba(0,0,0,0.4)';
+        ctx.beginPath();
+        ctx.ellipse(pos[i].x, footY + 1, 26, 4, 0, 0, Math.PI * 2);
+        ctx.fill();
+        this.drawMech(f, pos[i].x, pos[i].y, f.facing, null);
+      });
+      ctx.restore();
     }
 
     drawParticles() {
@@ -415,47 +446,84 @@
       ctx.fill();
       // Front arm and weapon.
       R(10, -70, 14, 12, body);
-      const weapon = f.weapon ? GD.activeWeapon(f) : null;
+      const weapon = f.ranged ? GD.activeWeapon(f) : null;
+      const metal = ghostColor || '#59606e';
+      if (f.subFlash > 0 && !ghostColor) {
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = '#fff3a8';
+        ctx.beginPath(); ctx.arc(12, -80, 5, 0, Math.PI * 2); ctx.fill();
+        ctx.globalCompositeOperation = 'source-over';
+      }
       if (st === 'guard') {
         R(18, -64, 20, 9, body);
         R(36, -64, 6, 9, dark);
       } else if (f.melee) {
-        const m = f.melee, w = m.w;
-        const phase = m.t < w.windup ? m.t / w.windup : 1;
-        const swing = m.t < w.windup ? -0.9 + phase * 0.9 : Math.min(1, (m.t - w.windup) / w.active) * 0.6;
-        ctx.save();
-        ctx.translate(16, -62);
-        ctx.rotate(swing);
-        R(0, -4, 14, 8, body);
-        R(14, -3, 10, 6, ghostColor || '#59606e');
-        if (!ghostColor) {
-          ctx.globalCompositeOperation = 'lighter';
-          ctx.fillStyle = 'rgba(255,122,26,0.35)';
-          ctx.fillRect(22, -8, m.range - 6, 16);
-          ctx.fillStyle = '#ffd7a8';
-          ctx.fillRect(22, -3, m.range - 6, 6);
-          ctx.globalCompositeOperation = 'source-over';
-        }
-        ctx.restore();
+        this.drawSwing2D(f.melee, body, metal, ghostColor);
       } else {
         const recoil = f.recoil ? f.recoil * 4 : 0;
         R(12 + armSwing, -58, 10, 18, body);
         R(12 + armSwing, -40, 10, 5, dark);
-        if (weapon && weapon.kind === 'projectile' && weapon.id !== 'vulcan') {
+        if (weapon && weapon.kind === 'projectile') {
           // Rifle held at shoulder height; bigger silhouettes for heavy weapons.
           const aim = -(f.lastAim || 0) * Math.PI / 180 * 0.5;
           ctx.save();
           ctx.translate(14 - recoil, -62);
           ctx.rotate(-aim);
-          if (weapon.id === 'bazooka') { R(-8, -6, 40, 10, ghostColor || '#59606e'); R(28, -8, 8, 14, ghostColor || '#2f333d'); }
-          else if (weapon.id === 'grenade') { R(0, -4, 16, 8, ghostColor || '#59606e'); }
-          else { R(0, -4, 30, 6, ghostColor || '#59606e'); R(22, -6, 6, 10, ghostColor || weapon.color); }
+          if (weapon.id === 'bazooka') { R(-8, -6, 40, 10, metal); R(28, -8, 8, 14, ghostColor || '#2f333d'); }
+          else if (weapon.id === 'grenade') { R(0, -4, 16, 8, metal); R(14, -5, 6, 10, ghostColor || '#3d4a3d'); }
+          else { R(0, -4, 30, 6, metal); R(22, -6, 6, 10, ghostColor || weapon.color); }
           ctx.restore();
-        } else if (weapon && weapon.id === 'vulcan') {
-          R(0, -74, 10, 3, ghostColor || '#ffe066');
         } else if (weapon && weapon.kind === 'melee') {
-          R(20, -62, 6, 14, ghostColor || '#59606e'); // sheathed saber hilt
+          // Melee weapon at rest in the front hand.
+          const hx = 17 + armSwing;
+          if (weapon.style === 'axe') {
+            R(hx - 2, -66, 4, 30, metal);
+            R(hx - 2, -70, 14, 11, ghostColor || '#7a3328');
+            R(hx + 10, -70, 3, 11, ghostColor || '#ff6a3a');
+          } else if (weapon.style === 'lance') {
+            R(hx - 28, -40, 70, 4, metal);
+            R(hx + 40, -42, 8, 8, ghostColor || weapon.color);
+          } else {
+            R(hx - 2, -48, 4, 12, metal);
+            R(hx - 3, -50, 6, 3, ghostColor || weapon.color);
+          }
         }
+      }
+      ctx.restore();
+    }
+
+    // Melee swing in mech-local space (facing +x). Saber arcs, axe chops overhead, lance thrusts.
+    drawSwing2D(m, body, metal, ghostColor) {
+      const ctx = this.ctx;
+      const w = m.w;
+      const R = (x0, y0, ww, hh, c) => { ctx.fillStyle = c; ctx.fillRect(x0, y0, ww, hh); };
+      const wind = m.t < w.windup;
+      const p = wind ? m.t / w.windup : Math.min(1, (m.t - w.windup) / w.active);
+      const glow = (x0, y0, ww, hh, outer, inner) => {
+        if (ghostColor) return;
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = outer; ctx.fillRect(x0, y0 - 4, ww, hh + 8);
+        ctx.fillStyle = inner; ctx.fillRect(x0, y0, ww, hh);
+        ctx.globalCompositeOperation = 'source-over';
+      };
+      ctx.save();
+      ctx.translate(16, -62);
+      if (w.style === 'lance') {
+        const reach = wind ? -12 * p : -12 + (m.range * 0.55 + 12) * p;
+        R(0, -4, 16, 8, body);
+        R(reach - 14, -2, 40, 4, metal);
+        glow(reach + 26, -3, m.range * 0.6, 6, 'rgba(90,210,255,0.35)', '#c8f3ff');
+      } else if (w.style === 'axe') {
+        ctx.rotate(wind ? -1.9 - 0.4 * p : -2.3 + 3.1 * p);
+        R(0, -4, 14, 8, body);
+        R(12, -2, 36, 4, metal);
+        R(42, -11, 14, 22, ghostColor || '#7a3328');
+        glow(54, -11, 4, 22, 'rgba(255,90,40,0.4)', '#ffb08a');
+      } else {
+        ctx.rotate(wind ? -0.9 + p * 0.9 : p * 0.6);
+        R(0, -4, 14, 8, body);
+        R(14, -3, 10, 6, metal);
+        glow(22, -3, m.range - 6, 6, 'rgba(255,122,26,0.35)', '#ffd7a8');
       }
       ctx.restore();
     }
@@ -560,9 +628,6 @@
       ctx.fillStyle = '#e7ecf5';
       ctx.font = `16px ${MONO}`;
       ctx.fillText(`PLAYER ${winner.player} · ${winner.mech.code} ${winner.mech.name} WINS`, W / 2, H / 2 + 26);
-      ctx.fillStyle = '#8b95ad';
-      ctx.font = `12px ${MONO}`;
-      ctx.fillText('Enter 再來一場', W / 2, H / 2 + 50);
       ctx.textAlign = 'left';
     }
 
@@ -633,28 +698,7 @@
         ctx.fillStyle = enFlash ? '#ff5d5d' : '#8b95ad';
         ctx.fillText(`ENERGY ${Math.round(f.energy)}`, left ? fuelX + fuelW + 8 : fuelX - 8, 59);
 
-        // Weapon readout along the bottom: active weapon bright, the other dim.
-        const rows = [f.weapon, f.secondary].map((w) => {
-          const active = GD.activeWeapon(f) === w;
-          let ammo = w.kind === 'melee' ? '' : w.ammo === Infinity ? '∞' : `${f.ammo[w.id]}/${w.ammo}`;
-          if (w.kind === 'projectile' && w.ammo !== Infinity && f.ammo[w.id] < w.ammo && f.sinceFire >= GD.COMBAT.reloadDelay) ammo += ' ↻';
-          return { text: `${active ? '▶ ' : '  '}${w.name} ${ammo}`.trim(), active };
-        });
-        ctx.font = `12px ${MONO}`;
-        const tw = Math.max(...rows.map((r) => ctx.measureText(r.text).width)) + 20;
-        ctx.fillStyle = 'rgba(0,0,0,0.55)';
-        ctx.fillRect(left ? 12 : W - 12 - tw, H - 48, tw, 38);
-        rows.forEach((r, i) => {
-          ctx.fillStyle = r.active ? '#e7ecf5' : '#6c778f';
-          ctx.fillText(r.text, left ? 20 : W - 20, H - 32 + i * 15);
-        });
-        // Cooldown sliver under the readout.
-        const w = GD.activeWeapon(f);
-        if (f.cooldown > 0 && w.cooldown) {
-          ctx.fillStyle = '#ff7a1a';
-          const cw = tw * Math.min(1, f.cooldown / (w.cooldown || 1));
-          ctx.fillRect(left ? 12 : W - 12 - cw, H - 11, cw, 2);
-        }
+        this.drawLoadoutReadout(f, left);
       }
 
       ctx.textAlign = 'center';
@@ -664,6 +708,45 @@
       ctx.font = `10px ${MONO}`;
       ctx.fillStyle = '#8b95ad';
       ctx.fillText(world.stage.label, W / 2, 42);
+      ctx.textAlign = 'left';
+    }
+
+    // Bottom-corner readout: ranged and melee slots (active one marked), vulcan, swap cooldown.
+    drawLoadoutReadout(f, left) {
+      const ctx = this.ctx;
+      const keys = GD.BINDINGS[f.player];
+      const k = (a) => GD.keyLabel(keys[a][0]);
+      const ammoOf = (w) => {
+        if (w.ammo === Infinity) return '∞';
+        let t = `${f.ammo[w.id]}/${w.ammo}`;
+        if (f.ammo[w.id] < w.ammo && f.sinceFire >= GD.COMBAT.reloadDelay) t += ' ↻';
+        return t;
+      };
+      const rows = [
+        { text: `${f.mode === 'ranged' ? '▶' : ' '} ${f.ranged.name} ${ammoOf(f.ranged)}`, color: f.mode === 'ranged' ? '#e7ecf5' : '#6c778f' },
+        { text: `${f.mode === 'melee' ? '▶' : ' '} ${f.meleeW.name}`, color: f.mode === 'melee' ? '#e7ecf5' : '#6c778f' },
+        { text: `  VULCAN ${ammoOf(GD.VULCAN)} [${k('sub')}]`, color: '#a9b3c9' },
+      ];
+      const ready = f.switchCd <= 0;
+      const swText = ready ? `SWITCH [${k('switch')}] READY` : `SWITCH ${f.switchCd.toFixed(1)}s`;
+      const swColor = f.switchDenied > 0 ? '#ff5d5d' : ready ? '#4cd48a' : '#8b95ad';
+      ctx.font = `12px ${MONO}`;
+      const tw = Math.max(150, ...rows.map((r) => ctx.measureText(r.text).width), ctx.measureText(swText).width) + 20;
+      const x0 = left ? 12 : W - 12 - tw;
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(x0, H - 78, tw, 68);
+      ctx.textAlign = left ? 'left' : 'right';
+      const tx = left ? x0 + 8 : x0 + tw - 8;
+      rows.forEach((r, i) => { ctx.fillStyle = r.color; ctx.fillText(r.text, tx, H - 62 + i * 14); });
+      ctx.fillStyle = swColor;
+      ctx.fillText(swText, tx, H - 20);
+      // Swap cooldown bar fills up as the swap becomes available again.
+      const frac = 1 - f.switchCd / GD.COMBAT.switchCooldown;
+      ctx.fillStyle = 'rgba(255,255,255,0.1)';
+      ctx.fillRect(x0, H - 12, tw, 2);
+      ctx.fillStyle = ready ? '#4cd48a' : '#ff7a1a';
+      const bw = tw * Math.max(0, Math.min(1, frac));
+      ctx.fillRect(left ? x0 : x0 + tw - bw, H - 12, bw, 2);
       ctx.textAlign = 'left';
     }
 
@@ -704,21 +787,10 @@
       ctx.textAlign = 'left';
     }
 
-    drawPause(opts) {
+    drawPause() {
       const ctx = this.ctx;
-      ctx.fillStyle = 'rgba(5,7,13,0.72)';
+      ctx.fillStyle = 'rgba(5,7,13,0.6)';
       ctx.fillRect(0, 0, W, H);
-      ctx.textAlign = 'center';
-      ctx.fillStyle = '#ff7a1a';
-      ctx.font = `44px ${DISPLAY}`;
-      ctx.fillText(opts.focusLost ? 'CLICK TO FOCUS' : 'PAUSED', W / 2, H / 2 - 40);
-      ctx.font = `15px ${MONO}`;
-      ctx.fillStyle = '#e7ecf5';
-      const lines = opts.focusLost
-        ? ['點一下遊戲畫面，讓鍵盤輸入回到遊戲']
-        : ['Esc 繼續   ·   Enter 重置位置', '1 地球   ·   2 太空   ·   ` 除錯資訊'];
-      lines.forEach((l, i) => ctx.fillText(l, W / 2, H / 2 + 4 + i * 26));
-      ctx.textAlign = 'left';
     }
   }
 

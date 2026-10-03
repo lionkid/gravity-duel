@@ -8,7 +8,7 @@
     color-scheme: dark;
     --bg: #0a0e17; --bg-2: #111827; --panel: #161e30; --line: #2a3654;
     --text: #e7ecf5; --muted: #8b95ad; --accent: #ff7a1a; --accent-2: #35c7e8;
-    --p1: #e8453c; --p2: #3a7bff;
+    --p1: #e8453c; --p2: #3a7bff; --good: #4cd48a; --bad: #ff5d5d;
     --display: "Russo One", "Noto Sans TC", sans-serif;
     --body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
     --mono: "Share Tech Mono", ui-monospace, Menlo, monospace;
@@ -20,40 +20,142 @@
   .wrap { max-width: 1040px; margin: 0 auto; padding-block: 20px 48px; padding-inline: 16px; display: grid; gap: 14px; }
   header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 8px 24px; }
   h1 { font-family: var(--display); font-weight: 400; font-size: 30px; margin: 0; letter-spacing: 0.03em; line-height: 1.1; }
-  h2 { font-family: var(--display); font-weight: 400; font-size: 14px; margin: 0; letter-spacing: 0.06em; }
+  h2, h3 { font-family: var(--display); font-weight: 400; margin: 0; letter-spacing: 0.05em; }
+  h2 { font-size: 14px; }
   .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); }
   .muted { color: var(--muted); }
+  kbd { font-family: var(--mono); font-size: 11px; background: #1d2740; border: 1px solid var(--line); border-bottom-width: 2px;
+    border-radius: 3px; padding: 0 5px; min-width: 20px; text-align: center; color: var(--text); display: inline-block; }
+  button { font: inherit; color: inherit; }
+  button:focus-visible, canvas:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
 
-  .toolbar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
-  .group { display: flex; gap: 6px; align-items: center; }
-  .group > .label { font-family: var(--mono); font-size: 12px; color: var(--muted); }
-  button, select {
-    font-family: var(--mono); font-size: 13px; color: var(--text); background: var(--bg-2);
-    border: 1px solid var(--line); border-radius: 3px; padding: 6px 10px; cursor: pointer;
-  }
-  button:hover, select:hover { border-color: var(--accent-2); }
-  button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #0a0e17; }
-  button:focus-visible, select:focus-visible, canvas:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
-  select.p1 { border-top: 2px solid var(--p1); }
-  select.p2 { border-top: 2px solid var(--p2); }
-
+  /* ---- game frame: canvas + menu overlay that scales with the frame width ---- */
   .frame { position: relative; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: #05070d;
-    box-shadow: 0 0 0 5px #0d1220; }
+    box-shadow: 0 0 0 5px #0d1220; container-type: inline-size; }
   canvas { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; max-width: 100%; outline: none; }
+  .screens { position: absolute; inset: 0; pointer-events: none; font-size: 13px; font-size: 1.4cqw; line-height: 1.35; }
+  .screens kbd { font-size: 0.82em; padding: 0 0.35em; min-width: 1.5em; }
+  .scr { position: absolute; inset: 0; pointer-events: auto; padding: 1.4em 1.7em; display: flex; flex-direction: column; gap: 0.75em; }
+  .panel { background: rgba(10, 14, 23, 0.82); border: 1px solid var(--line); border-radius: 0.3em; backdrop-filter: blur(3px); }
+  .scr-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1em; }
+  .scr-head h2 { font-size: 1.45em; color: var(--accent-2); }
+  .step { font-family: var(--mono); font-size: 0.8em; color: var(--muted); }
+  .keys-hint { margin: 0; margin-top: auto; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.4em 1em;
+    font-family: var(--mono); font-size: 0.78em; color: var(--muted); }
 
+  /* title */
+  .scr-title { justify-content: center; padding-left: 3em; gap: 1.2em;
+    background: linear-gradient(90deg, rgba(5, 7, 13, 0.88), rgba(5, 7, 13, 0.45) 45%, transparent 70%); }
+  .logo .eyebrow { font-size: 0.85em; }
+  .logo h1 { font-size: 4.4em; line-height: 0.95; margin-block: 0.15em; }
+  .logo p { margin: 0; color: var(--muted); max-width: 24em; }
+  .scr-title .keys-hint { margin-top: 0; justify-content: flex-start; }
+  .menu { display: grid; gap: 0.25em; justify-items: start; }
+  .menu button { font-family: var(--display); font-size: 1.15em; color: var(--muted); background: transparent; border: 1px solid transparent;
+    padding: 0.3em 0.8em; cursor: pointer; border-radius: 0.2em; }
+  .menu button:hover { color: var(--text); }
+  .menu button.on { color: var(--text); border-color: var(--accent); background: rgba(255, 122, 26, 0.16); }
+  .menu button.on::before { content: "▶ "; color: var(--accent); }
+
+  /* select + loadout: player panels at the sides, frames visible in the middle */
+  .cols { flex: 1; min-height: 0; display: grid; grid-template-columns: 31% 1fr 31%; gap: 1em; }
+  .vs { align-self: start; justify-self: center; font-family: var(--display); font-size: 1.6em; color: rgba(231, 236, 245, 0.35); }
+  .side { padding: 0.75em 0.8em; display: flex; flex-direction: column; gap: 0.5em; min-height: 0; overflow: hidden; }
+  .side.p1 { border-top: 0.22em solid var(--p1); }
+  .side.p2 { border-top: 0.22em solid var(--p2); }
+  .who { display: flex; justify-content: space-between; align-items: center; gap: 0.5em; font-family: var(--mono); font-size: 0.8em; letter-spacing: 0.1em; }
+  .p1 .who { color: var(--p1); } .p2 .who { color: var(--p2); }
+  .tag { padding: 0 0.6em; border-radius: 1em; border: 1px solid var(--line); color: var(--muted); letter-spacing: 0.05em; }
+  .tag.ready { color: var(--good); border-color: var(--good); }
+  .pick-name { font-family: var(--display); font-size: 1.35em; line-height: 1.1; display: flex; align-items: baseline; gap: 0.4em; flex-wrap: wrap; }
+  .pick-name .code { font-family: var(--mono); font-size: 0.6em; color: var(--muted); }
+  .pick-name .role { font-family: var(--body); font-size: 0.55em; color: var(--accent-2); margin-left: auto; }
+  .lbl { font-family: var(--mono); font-size: 0.72em; color: var(--muted); letter-spacing: 0.1em; }
+  .cards { display: grid; gap: 0.35em; }
+  .cards.c2 { grid-template-columns: 1fr 1fr; }
+  .cards.c3 { grid-template-columns: 1fr 1fr 1fr; }
+  .card { text-align: left; background: rgba(17, 24, 39, 0.92); border: 1px solid var(--line); border-radius: 0.25em; padding: 0.4em 0.5em;
+    display: grid; gap: 0.05em; cursor: pointer; min-width: 0; }
+  .card:hover { border-color: var(--accent-2); }
+  .card .nm { font-family: var(--display); font-size: 0.86em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card .cd { font-family: var(--mono); font-size: 0.68em; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .wcard .nm { font-family: var(--body); font-size: 0.9em; }
+  .wcard .cd b { font-weight: 400; color: var(--accent-2); font-size: 1.15em; }
+  .slot { display: grid; gap: 0.35em; padding: 0.35em; margin: -0.35em; border-radius: 0.3em; border: 1px dashed transparent; }
+  .p1 .slot.active { border-color: rgba(232, 69, 60, 0.55); }
+  .p2 .slot.active { border-color: rgba(58, 123, 255, 0.6); }
+  .card.sel { border-color: var(--accent); background: rgba(255, 122, 26, 0.18); }
+  .p1 .card.cur, .p1 .scr-select .card.sel { box-shadow: 0 0 0 0.14em var(--p1); }
+  .p2 .card.cur { box-shadow: 0 0 0 0.14em var(--p2); }
+  .scr-select .p1 .card.sel { box-shadow: 0 0 0 0.14em var(--p1); }
+  .scr-select .p2 .card.sel { box-shadow: 0 0 0 0.14em var(--p2); }
+  .is-ready .card:not(.sel) { opacity: 0.45; }
+  .stats { display: grid; gap: 0.22em; }
+  .stat { display: grid; grid-template-columns: 4.4em 1fr 1em 3.2em; gap: 0.5em; align-items: center; font-family: var(--mono); font-size: 0.74em; }
+  .stat .bar { height: 0.55em; background: rgba(255, 255, 255, 0.08); position: relative; }
+  .stat .bar i { position: absolute; inset: 0 auto 0 0; background: var(--accent-2); }
+  .stat .v { text-align: right; } .stat .real { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+  .weak { margin: 0; font-size: 0.78em; color: var(--muted); }
+  .weak b { color: var(--bad); font-weight: 500; margin-right: 0.5em; }
+  .readybtn { margin-top: auto; background: rgba(17, 24, 39, 0.92); border: 1px solid var(--line); border-radius: 0.25em; padding: 0.45em;
+    cursor: pointer; font-family: var(--mono); font-size: 0.82em; }
+  .readybtn:hover { border-color: var(--accent-2); }
+  .readybtn.on { color: var(--good); border-color: var(--good); }
+  .detail { display: grid; gap: 0.25em; font-size: 0.76em; border-top: 1px dashed var(--line); padding-top: 0.45em; }
+  .d-name { font-family: var(--display); font-size: 1.15em; display: flex; gap: 0.5em; align-items: baseline; }
+  .d-name span { font-family: var(--body); font-size: 0.75em; color: var(--muted); }
+  .d-facts { display: flex; flex-wrap: wrap; gap: 0.3em 0.8em; font-family: var(--mono); color: var(--accent-2); }
+  .d-aff { display: flex; gap: 0.5em; align-items: baseline; color: var(--muted); }
+  .d-note { color: var(--text); }
+  .pill { font-family: var(--mono); font-size: 0.92em; padding: 0 0.55em; border-radius: 1em; border: 1px solid currentColor; white-space: nowrap; }
+  .pill.good { color: var(--good); } .pill.even { color: var(--accent-2); } .pill.bad { color: var(--bad); }
+
+  /* stage */
+  .stage-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 1em; }
+  .stage-card { text-align: left; padding: 0.8em 1em; display: grid; gap: 0.3em; cursor: pointer; }
+  .stage-card:hover { border-color: var(--accent-2); }
+  .stage-card.on { border-color: var(--accent); box-shadow: 0 0 0 0.14em var(--accent); }
+  .stage-card .g { font-family: var(--mono); font-size: 0.75em; color: var(--accent-2); }
+  .stage-card h3 { font-size: 1.3em; }
+  .stage-card ul { margin: 0; padding-left: 1.2em; color: var(--muted); font-size: 0.82em; }
+  .stage-card.earth h3 { color: #ffc28a; } .stage-card.space h3 { color: #c9b6ff; }
+  .matchup { display: grid; grid-template-columns: 1fr 1fr; gap: 1em; }
+  .mu { padding: 0.55em 0.8em; display: grid; gap: 0.25em; font-size: 0.8em; }
+  .mu > div:not(.who) { display: flex; gap: 0.5em; align-items: baseline; }
+  .mu.p1 { border-left: 0.22em solid var(--p1); } .mu.p2 { border-left: 0.22em solid var(--p2); }
+  .go { background: var(--accent); color: #0a0e17; border: 0; border-radius: 0.25em; padding: 0.45em 1em; cursor: pointer; font-family: var(--display); font-size: 1.1em; }
+  .go kbd { color: var(--text); }
+
+  /* pause, KO and help */
+  .scr-pause, .scr-help { align-items: center; justify-content: center; background: rgba(5, 7, 13, 0.35); }
+  .modal { padding: 1.1em 1.4em; display: grid; gap: 0.8em; min-width: 18em; max-width: 92%; max-height: 92%; overflow: auto; }
+  .modal h2 { font-size: 1.4em; color: var(--accent); }
+  .modal .keys-hint { margin-top: 0; }
+  .scr-ko { justify-content: flex-end; align-items: center; padding-bottom: 2.2em; }
+  .ko-bar { padding: 0.5em 0.8em; }
+  .menu-ko { grid-auto-flow: column; }
+  .help table { border-collapse: collapse; font-size: 0.85em; }
+  .help th, .help td { text-align: left; padding: 0.3em 0.8em 0.3em 0; border-bottom: 1px solid var(--line); }
+  .help th { font-family: var(--mono); font-size: 0.85em; color: var(--muted); font-weight: 400; }
+  .help ul { margin: 0; padding-left: 1.2em; color: var(--muted); font-size: 0.85em; max-width: 38em; }
+  .help .readybtn { justify-self: start; padding-inline: 1em; }
+  .tablewrap { overflow-x: auto; }
+
+  .focus-hint { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(5, 7, 13, 0.6); cursor: pointer;
+    font-family: var(--display); font-size: 22px; font-size: 2.2cqw; color: var(--accent); text-align: center; z-index: 5; }
+  .focus-hint small { display: block; font-family: var(--body); font-size: 0.55em; color: var(--text); margin-top: 0.4em; }
+
+  /* ---- below the frame ---- */
   .monitor { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   @media (max-width: 720px) { .monitor { grid-template-columns: 1fr; } }
-  .side { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 10px 12px; display: grid; gap: 8px; }
-  .side.p1 { border-top: 3px solid var(--p1); } .side.p2 { border-top: 3px solid var(--p2); }
-  .side.p1 h2 { color: var(--p1); } .side.p2 h2 { color: var(--p2); }
-  .chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; }
+  .mon { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 10px 12px; display: grid; gap: 8px; }
+  .mon.p1 { border-top: 3px solid var(--p1); } .mon.p2 { border-top: 3px solid var(--p2); }
+  .mon.p1 h2 { color: var(--p1); } .mon.p2 h2 { color: var(--p2); }
+  .chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
   .chip { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 4px 8px;
     border: 1px solid var(--line); border-radius: 3px; background: var(--bg-2); font-size: 12px; transition: background 60ms, border-color 60ms; }
-  .chip.on { background: rgba(255,122,26,0.22); border-color: var(--accent); }
-  .keys { display: flex; gap: 3px; }
-  kbd { font-family: var(--mono); font-size: 11px; background: #1d2740; border: 1px solid var(--line); border-bottom-width: 2px;
-    border-radius: 3px; padding: 0 5px; min-width: 20px; text-align: center; color: var(--text); }
-
+  .chip.on { background: rgba(255, 122, 26, 0.22); border-color: var(--accent); }
+  .chip .keys { display: flex; gap: 3px; }
   .notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px 24px; }
   .note { border-left: 2px solid var(--line); padding-left: 12px; display: grid; gap: 6px; align-content: start; }
   .note ul { margin: 0; padding-left: 18px; color: var(--muted); }
@@ -64,89 +166,56 @@
 <div class="wrap">
   <header>
     <div>
-      <div class="eyebrow">Build M2 · 武器系統</div>
+      <div class="eyebrow">Build M3 · 選擇流程</div>
       <h1>GRAVITY DUEL</h1>
     </div>
-    <p class="muted">點一下畫面後，兩位玩家就能同時用鍵盤操作。Esc 暫停，KO 後按 Enter 再來一場。</p>
+    <p class="muted">同一台電腦、同一個鍵盤的雙人對戰。點一下畫面開始，Esc 暫停。</p>
   </header>
 
-  <div class="toolbar">
-    <div class="group" role="group" aria-label="場景">
-      <span class="label">場景</span>
-      <button data-stage="earth" aria-pressed="true">EARTH 1.0 G</button>
-      <button data-stage="space" aria-pressed="false">SPACE 0 G</button>
-    </div>
-    <div class="group">
-      <label class="label" for="p1Mech">P1</label>
-      <select id="p1Mech" class="p1"></select>
-      <select id="p1Weapon" class="p1" aria-label="P1 主武器"></select>
-    </div>
-    <div class="group">
-      <label class="label" for="p2Mech">P2</label>
-      <select id="p2Mech" class="p2"></select>
-      <select id="p2Weapon" class="p2" aria-label="P2 主武器"></select>
-    </div>
-    <div class="group">
-      <button id="resetBtn">重置位置</button>
-      <button id="debugBtn" aria-pressed="false">除錯資訊 `</button>
-    </div>
-  </div>
-
-  <div class="frame">
+  <div class="frame" id="frame">
     <canvas id="game" tabindex="0" aria-label="遊戲畫面"></canvas>
+    <div class="screens" id="screens"></div>
+    <div class="focus-hint" id="focusHint" hidden>點一下畫面開始<small>鍵盤輸入只會送到目前被點選的視窗</small></div>
   </div>
 
   <div class="monitor">
-    <div class="side p1">
+    <div class="mon p1">
       <h2>PLAYER 1 · 按鍵監看</h2>
       <div class="chips" id="monitor1"></div>
     </div>
-    <div class="side p2">
+    <div class="mon p2">
       <h2>PLAYER 2 · 按鍵監看</h2>
       <div class="chips" id="monitor2"></div>
     </div>
   </div>
 
   <div class="notes">
-    <div class="note" data-help="earth">
-      <h2>地球操作</h2>
+    <div class="note">
+      <h2>流程</h2>
       <ul>
-        <li><b>左右</b>走動，<b>跳躍鍵</b>起跳。</li>
-        <li>空中<b>按住跳躍鍵</b>啟動推進器滯空，燃料耗盡會過熱，要回到 30% 才能再用。</li>
-        <li><b>下 + 跳躍</b>從平台往下穿。</li>
-        <li><b>衝刺</b>短時間無視重力高速移動，消耗燃料。</li>
-        <li><b>防禦</b>在地面站定並展開護盾，正面來的攻擊只吃 25% 傷害。</li>
-        <li>實體彈藥會受重力下墜。<b>按住上 + 攻擊</b>抬高射角，火箭砲與榴彈才打得到中距離。</li>
-      </ul>
-    </div>
-    <div class="note" data-help="space" hidden>
-      <h2>太空操作</h2>
-      <ul>
-        <li><b>上下左右</b>全方向推進，放開後會保留慣性持續漂移。</li>
-        <li><b>方向 + 跳躍鍵</b>加速推進，燃料消耗三倍。</li>
-        <li><b>只按跳躍鍵</b>逆噴射煞車。</li>
-        <li>撞到邊界或對手會反彈，停止推進 0.6 秒後燃料才開始回復。</li>
-        <li>所有彈藥直線飛行，火箭砲變成最強遠距武器；榴彈飛 3 秒後空爆。</li>
-        <li>擊退不會被地面摩擦吸收，中彈後會漂很遠，記得逆噴射煞車。</li>
+        <li><b>標題</b>：開始對戰、切換 2.5D / 2D 視角、看操作說明。</li>
+        <li><b>選擇機體</b>：兩人同時選，各自按攻擊鍵準備，雙方都準備好就自動往下。</li>
+        <li><b>武裝配置</b>：遠程與近戰各選一把，右邊會顯示這把武器在地球與太空的優劣。</li>
+        <li><b>選擇場景</b>：下方會列出雙方武裝在這個場景是有利還是不利。</li>
+        <li>勝負分出後可以再戰、換武裝或換機體。上次的選擇會記在這個瀏覽器裡。</li>
       </ul>
     </div>
     <div class="note">
-      <h2>武器</h2>
+      <h2>操作重點</h2>
       <ul>
-        <li><b>光束步槍</b>：不受重力，每發耗 30 能量，能量不足會顯示 EN LOW。</li>
-        <li><b>火箭砲</b>：4 發、高傷害、爆風。彈速慢，可以被機槍或火神砲擊落。</li>
-        <li><b>機槍</b>：按住連射，60 發，略微下墜。</li>
-        <li><b>榴彈</b>：地球會拋物線落地爆炸，爆風也會傷到自己。</li>
-        <li><b>光束軍刀</b>：近戰，出刀瞬間有 4 幀無敵，衝刺中出刀距離更長。</li>
-        <li><b>切換鍵</b>換成頭部火神砲：48 發連射，所有機體內建。彈藥放開扳機一秒後開始回復。</li>
+        <li><b>上鍵</b>：地面跳躍，空中按住噴射。太空中四個方向都是噴射方向。</li>
+        <li><b>切換鍵</b>：遠程 ⇄ 近戰，切換後 3 秒內不能再換，HUD 右下會倒數。</li>
+        <li><b>火神砲</b>有自己的按鍵（P1 G、P2 Num2 或 L），任何模式都能用。</li>
+        <li><b>按住下鍵</b>約 0.2 秒穿越平台；邊按下邊攻擊則是往下瞄準。</li>
+        <li><b>太空中防禦</b>同時是逆噴射煞車。</li>
       </ul>
     </div>
     <div class="note">
-      <h2>M2 範圍</h2>
+      <h2>傷害調整</h2>
       <ul>
-        <li>已完成：五種主武器、火神砲、重力係數彈道、命中與爆炸、裝甲減傷、防禦、硬直與擊退、能量與彈藥、KO。</li>
-        <li>武器目前用上方下拉選單切換，M3 會做成選擇畫面與預算制。</li>
-        <li>防具、回合制與計時在 M5。</li>
+        <li><b>遠程降低</b>：光束 90→70、火箭砲直擊 130、機槍 22→15、榴彈直擊 90。</li>
+        <li><b>近戰提高</b>：光束軍刀 220、熱能戰斧 300（破防）、光束長槍 170（距離 120）。</li>
+        <li><b>爆風加大</b>：火箭砲 70→120、榴彈 90→150。</li>
       </ul>
     </div>
   </div>
@@ -157,4 +226,6 @@
 <script src="src/physics.js"></script>
 <script src="src/combat.js"></script>
 <script src="src/render.js"></script>
+<script src="src/render3d.js"></script>
+<script src="src/screens.js"></script>
 <script src="src/main.js"></script>

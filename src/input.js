@@ -9,7 +9,7 @@
       this.latch = {};                // per player: actions pressed since last sample
       this.codeMap = new Map();       // key code -> [{ player, action }]
       this.onGlobal = null;           // callback for system keys (pause, debug...)
-      this.globalCodes = new Set(['Escape', 'Backquote', 'Enter', 'Digit1', 'Digit2']);
+      this.globalCodes = new Set(['Escape', 'Backquote', 'Enter']);
 
       for (const [p, map] of Object.entries(bindings)) {
         this.latch[p] = {};
