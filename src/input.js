@@ -9,6 +9,7 @@
       this.latch = {};                // per player: actions pressed since last sample
       this.codeMap = new Map();       // key code -> [{ player, action }]
       this.onGlobal = null;           // callback for system keys (pause, debug...)
+      this.virtual = { 1: new Set(), 2: new Set() };   // actions held on the on-screen pads
       this.globalCodes = new Set(['Escape', 'Backquote', 'Enter']);
 
       for (const [p, map] of Object.entries(bindings)) {
@@ -49,9 +50,25 @@
       }
     }
 
+    // Virtual keys keep their held state: the pointer that holds them will still send its release.
     clear() {
       this.down.clear();
       for (const p of Object.keys(this.latch)) this.latch[p] = {};
+    }
+
+    // On-screen pad buttons press and release actions directly.
+    virtualDown(player, action) {
+      if (this.virtual[player].has(action)) return;
+      this.virtual[player].add(action);
+      this.latch[player][action] = true;
+    }
+
+    virtualUp(player, action) {
+      this.virtual[player].delete(action);
+    }
+
+    held(player, action) {
+      return this.virtual[player].has(action) || this.bindings[player][action].some((c) => this.down.has(c));
     }
 
     // Held state of every action plus edge-triggered presses.
@@ -59,9 +76,7 @@
     sample(player) {
       const map = this.bindings[player];
       const state = {};
-      for (const action of Object.keys(map)) {
-        state[action] = map[action].some((c) => this.down.has(c));
-      }
+      for (const action of Object.keys(map)) state[action] = this.held(player, action);
       state.pressed = this.latch[player];
       this.latch[player] = {};
       return state;
@@ -69,7 +84,7 @@
 
     // Used by the on-page input monitor; does not consume presses.
     peekHeld(player, action) {
-      return this.bindings[player][action].some((c) => this.down.has(c));
+      return this.held(player, action);
     }
   }
 

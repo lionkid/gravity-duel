@@ -109,6 +109,9 @@
     menus.global(code);
   };
 
+  // On-screen pads: pressing one also lifts the focus guard, so mouse or touch players are never paused.
+  if (GD.mountTouchPads) GD.mountTouchPads(input, () => { app.focusLost = false; });
+
   // ---- input monitor below the game: which actions each player is holding ----
   const monitorCells = [];
   for (const p of [1, 2]) {
