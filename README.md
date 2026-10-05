@@ -169,17 +169,23 @@ Windows、Mac 與 Node.js 版都可以互相看到房間並對戰。每台電腦
 
 ### 發布 Release
 
-到 GitHub 的 Actions →「Release」→「Run workflow」。它會：
+兩種方式擇一：
+
+- 到 GitHub 的 Actions →「Release」→「Run workflow」。這個按鈕只在電腦版網頁出現。
+- 推送與 `package.json` 版本相同的 tag：`git tag v1.0.0 && git push origin v1.0.0`。
+
+workflow 會：
 
 1. 先跑測試。
 2. 在 Ubuntu 上建置 Windows 安裝程式與 zip，在 macOS 上建置 DMG。
 3. 建立 `v<版本號>` 的 Release，附上三個檔案與 SHA-256。
 
-勾選 draft 會先建成草稿，確認後再自己發布。要發新版前，先把 `package.json` 的版本號調高；同版本的 Release 已存在時，workflow 會停止。說明文字的範本在 `.github/release-notes.md`。
+手動執行時勾選 draft 會先建成草稿，確認後再自己發布。要發新版前，先把 `package.json` 的版本號調高；同版本的 Release 已存在時，workflow 會停止。說明文字的範本在 `.github/release-notes.md`。
 
 ### Windows
 
-在 Linux 或 macOS 上建置，需要 Node.js 20 以上、`curl`、`unzip`、`zip` 與 `makensis`（NSIS 3）：
+在 Linux 或 macOS 上建置，需要 Node.js 20 以上、`curl`、`unzip`、`zip` 與 `makensis`（NSIS 3）。
+macOS 用 `brew install makensis` 安裝 NSIS，Ubuntu 用 `sudo apt install nsis`。缺少工具時，建置一開始就會列出缺什麼、該怎麼裝。
 
 ```
 npm install
@@ -199,6 +205,9 @@ npm run build:win
 2. 用 Node 的 single executable application 把 `app/launcher.js` 包進去，成為 `GravityDuel.exe`。
 3. 設定圖示與版本資訊。
 4. 把遊戲檔案放在 exe 旁邊，交給 NSIS 打包。
+
+Homebrew 的 NSIS 沒有 64 位元的安裝程式外殼，所以在 Mac 上建出來的是 32 位元安裝程式（建置時會顯示一則警告）。
+它在 64 位元 Windows 上的安裝結果與 64 位元版完全相同：一樣裝到 `C:\Program Files`，遊戲本身仍是 64 位元。
 
 ### macOS
 

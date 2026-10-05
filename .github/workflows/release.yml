@@ -1,8 +1,12 @@
 # Builds the Windows installer, the portable zip and the macOS disk image, then publishes them as a
-# GitHub Release tagged v<version from package.json>. Run it by hand: Actions → Release → Run workflow.
+# GitHub Release tagged v<version from package.json>. Start it either way:
+#   - Actions → Release → Run workflow
+#   - push a tag that matches package.json: git tag v1.0.0 && git push origin v1.0.0
 name: Release
 
 on:
+  push:
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       draft:
@@ -75,6 +79,10 @@ jobs:
         run: |
           version=$(node -p "require('./package.json').version")
           tag="v$version"
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "$tag" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version."
+            exit 1
+          fi
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "::error::Release $tag already exists. Raise the version in package.json first."
             exit 1

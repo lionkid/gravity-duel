@@ -4,6 +4,8 @@
  * Steps: download the official Windows node.exe of this exact Node version, pack app/launcher.js
  * into it as a single executable app, set its icon and version info, then stage the game files
  * next to it and run makensis. Needs: Node 20+, curl, unzip, zip, makensis, `npm install` done.
+ * makensis: `brew install makensis` (macOS) or `sudo apt install nsis` (Debian/Ubuntu). Homebrew's
+ * NSIS has no 64-bit stubs, so a macOS build makes a 32-bit installer; it works the same on 64-bit Windows.
  * Run: npm run build:win */
 'use strict';
 
@@ -21,6 +23,31 @@ const stage = path.join(build, 'stage');
 const dist = path.join(root, 'dist');
 const run = (cmd, args, opts) => execFileSync(cmd, args, Object.assign({ stdio: 'inherit' }, opts));
 const step = (msg) => console.log(`\n== ${msg}`);
+
+// Check the tools first, so a missing one stops the build with a hint instead of halfway through.
+const has = (cmd) => {
+  try {
+    execFileSync(process.platform === 'win32' ? 'where' : 'sh', process.platform === 'win32' ? [cmd] : ['-c', `command -v ${cmd}`], { stdio: 'ignore' });
+    return true;
+  } catch (e) { return false; }
+};
+const INSTALL_HINT = {
+  darwin: { makensis: 'brew install makensis' },
+  linux: { makensis: 'sudo apt install nsis', zip: 'sudo apt install zip', unzip: 'sudo apt install unzip', curl: 'sudo apt install curl' },
+};
+const missing = ['curl', 'unzip', 'zip', 'makensis'].filter((t) => !has(t));
+for (const mod of ['postject/dist/cli.js', 'resedit']) {
+  try { require.resolve(mod); } catch (e) { missing.push(`npm:${mod.split('/')[0]}`); }
+}
+if (missing.length) {
+  console.error('缺少建置 Windows 版需要的工具：');
+  for (const t of missing) {
+    const hint = t.startsWith('npm:') ? 'npm install' : (INSTALL_HINT[process.platform] || {})[t];
+    console.error(`  - ${t.replace('npm:', '')}${hint ? `：請執行 ${hint}` : ''}`);
+  }
+  if (process.platform === 'win32') console.error('在 Windows 上建議用 WSL，或到 GitHub Actions 執行 Release workflow。');
+  process.exit(1);
+}
 
 for (const d of [build, cache, dist]) fs.mkdirSync(d, { recursive: true });
 fs.rmSync(stage, { recursive: true, force: true });

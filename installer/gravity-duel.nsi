@@ -1,8 +1,15 @@
 ; Gravity Duel - Windows installer (NSIS 3). Built by tools/build-win.js, which passes:
 ;   VERSION  e.g. 1.0.0        STAGE  folder with GravityDuel.exe and the game files
 ;   OUTFILE  installer path    ICON   path to icon.ico
-; 64-bit installer: the game itself only runs on 64-bit Windows.
-Target amd64-unicode
+; The game only runs on 64-bit Windows. Build a 64-bit installer when this NSIS has the amd64 stubs
+; (Debian/Ubuntu packages do); otherwise, e.g. Homebrew's makensis on macOS, a 32-bit Unicode one,
+; which installs the same files and checks for 64-bit Windows in .onInit.
+!if /FileExists "${NSISDIR}/Stubs/lzma_solid-amd64-unicode"
+  Target amd64-unicode
+!else
+  !warning "NSIS has no amd64 stubs here: building a 32-bit installer"
+  Unicode true
+!endif
 !ifdef NOCOMPRESS
   SetCompress off             ; test builds only: keeps strings readable for checks
 !else
