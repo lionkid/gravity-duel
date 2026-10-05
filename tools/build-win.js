@@ -30,11 +30,13 @@ fs.mkdirSync(stage, { recursive: true });
 const zipName = `node-${NODE}-win-x64.zip`;
 const zipPath = path.join(cache, zipName);
 const nodeExe = path.join(cache, `node-${NODE}.exe`);
-if (!fs.existsSync(nodeExe)) {
+const nodeLicense = path.join(cache, `node-${NODE}-LICENSE`);
+if (!fs.existsSync(nodeExe) || !fs.existsSync(nodeLicense)) {
   step(`download ${zipName}`);
   if (!fs.existsSync(zipPath)) run('curl', ['-fL', '--retry', '3', '-o', zipPath, `https://nodejs.org/dist/${NODE}/${zipName}`]);
-  run('unzip', ['-o', '-j', zipPath, `node-${NODE}-win-x64/node.exe`, '-d', cache]);
+  run('unzip', ['-o', '-j', zipPath, `node-${NODE}-win-x64/node.exe`, `node-${NODE}-win-x64/LICENSE`, '-d', cache]);
   fs.renameSync(path.join(cache, 'node.exe'), nodeExe);
+  fs.renameSync(path.join(cache, 'LICENSE'), nodeLicense);
 }
 
 // 2. Single executable application blob from the launcher.
@@ -93,6 +95,8 @@ const copy = (rel) => {
   fs.cpSync(from, to, { recursive: true });
 };
 ['index.html', 'src', 'server/lan-server.js', 'assets/icon.ico', 'assets/icon.png', 'README.md'].forEach(copy);
+// GravityDuel.exe is built from Node.js, so its license travels with it.
+fs.copyFileSync(nodeLicense, path.join(stage, 'node-LICENSE.txt'));
 
 // 6. Installer and portable zip.
 step('makensis');

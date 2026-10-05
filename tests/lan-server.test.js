@@ -39,6 +39,12 @@ function client(port) {
   assert.strictEqual((await get(port, '/../../etc/passwd')).status, 404);
   ok('serves the game files, refuses dot-files and paths outside the project');
 
+  await new Promise((r) => setTimeout(r, 40));
+  assert.ok(server.idleMs() >= 30, 'idle time grows without requests');
+  assert.strictEqual((await get(port, '/api/ping')).status, 204);
+  assert.ok(server.idleMs() < 30, 'a page ping resets the idle time');
+  ok('tracks idle time and answers page pings');
+
   const a = client(port);
   await a.ready;
   const ha = await a.next();
@@ -49,6 +55,7 @@ function client(port) {
   const hb = await b.next();
   assert.ok(hb.t === 'hello' && hb.player === 2 && hb.peer === true);
   assert.deepStrictEqual(await a.next(), { t: 'peer', on: true });
+  assert.strictEqual(server.idleMs(), 0, 'never idle while players are in the room');
   ok('first browser is player 1 (host), second is player 2, both told about each other');
 
   a.send(JSON.stringify({ t: 'in', h: 5 }));

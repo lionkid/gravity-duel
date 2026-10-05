@@ -508,6 +508,7 @@
         body = `<p>區域網路對戰需要用 Gravity Duel 程式開啟遊戲。目前這個頁面是直接開檔或在預覽中執行，無法連線。</p>
           <ol>
             <li><b>Windows</b>：執行安裝檔 <code>GravityDuel-Setup.exe</code>，從桌面的 Gravity Duel 圖示開啟。</li>
+            <li><b>macOS</b>：打開 <code>GravityDuel-mac.dmg</code>，把 Gravity Duel 拖到「應用程式」資料夾後開啟。</li>
             <li><b>其他系統</b>：安裝 Node.js 後在專案資料夾執行 <code>node server/lan-server.js</code>，用瀏覽器打開它顯示的網址。</li>
             <li>兩台電腦都選「區域網路對戰」，一台建立房間，另一台會在列表看到它。</li>
           </ol>

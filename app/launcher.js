@@ -1,10 +1,14 @@
 /* Gravity Duel - desktop launcher. Packaged into GravityDuel.exe as a Node single executable app,
  * but also runs as plain `node app/launcher.js` for development.
  *
+ * The macOS app bundle runs it with the official Node binary instead (see tools/build-mac.js).
+ *
  * 1. If this computer already runs a Gravity Duel server, just open the game again.
  * 2. Otherwise start the LAN server on the first free port from 8080 and open the game window
- *    (Microsoft Edge app window on Windows, the default browser elsewhere).
- * Flags: --port <n>  --no-browser */
+ *    (an Edge or Chrome app window when one is installed, the default browser otherwise).
+ * Flags: --port <n>  --no-browser
+ *        --idle-exit <s>  quit once no game page has checked in for s seconds and nobody is in the
+ *                         room. The macOS app uses it because it has no console window to close. */
 'use strict';
 
 const path = require('path');
@@ -23,6 +27,7 @@ const args = process.argv.slice(isSea ? 1 : 2);
 const flag = (name) => args.includes(name);
 const portArg = (() => { const i = args.indexOf('--port'); return i >= 0 ? Number(args[i + 1]) : 0; })();
 const FIRST_PORT = portArg || 8080;
+const idleExit = (() => { const i = args.indexOf('--idle-exit'); return i >= 0 ? Number(args[i + 1]) || 0 : 0; })();
 
 if (process.platform === 'win32') process.title = 'Gravity Duel';
 
@@ -57,6 +62,16 @@ function edgePath() {
   return null;
 }
 
+// Chromium browsers on macOS that can open a borderless app window.
+const MAC_APP_BROWSERS = ['Google Chrome', 'Microsoft Edge', 'Brave Browser', 'Chromium'];
+function macBrowser() {
+  const homeApps = path.join(process.env.HOME || '', 'Applications');
+  for (const name of MAC_APP_BROWSERS) {
+    if (['/Applications', homeApps].some((d) => fs.existsSync(path.join(d, `${name}.app`)))) return name;
+  }
+  return null;
+}
+
 function openGame(url) {
   if (flag('--no-browser')) return;
   const detached = { detached: true, stdio: 'ignore' };
@@ -67,7 +82,9 @@ function openGame(url) {
       if (edge) spawn(edge, [`--app=${url}`, '--window-size=1280,900'], detached).unref();
       else spawn('cmd', ['/c', 'start', '', url], Object.assign({ windowsHide: true }, detached)).unref();
     } else if (process.platform === 'darwin') {
-      spawn('open', [url], detached).unref();
+      const browser = macBrowser();
+      if (browser) spawn('open', ['-na', browser, '--args', `--app=${url}`, '--window-size=1280,900'], detached).unref();
+      else spawn('open', [url], detached).unref();
     } else {
       spawn('xdg-open', [url], detached).unref();
     }
@@ -107,6 +124,15 @@ function openGame(url) {
   console.log('  區域網路對戰：雙方都打開 Gravity Duel，選「區域網路對戰」。');
   console.log('  一台建立房間，另一台會在列表中自動看到它。');
   console.log('');
-  console.log('  關閉這個視窗就會結束遊戲伺服器。');
+  if (idleExit) {
+    console.log(`  遊戲畫面全部關閉約 ${Math.round(idleExit / 60)} 分鐘後，伺服器會自動結束。`);
+    setInterval(() => {
+      if (server.idleMs() < idleExit * 1000) return;
+      console.log('沒有遊戲畫面在使用，伺服器結束。');
+      process.exit(0);
+    }, 5000).unref();
+  } else {
+    console.log('  關閉這個視窗就會結束遊戲伺服器。');
+  }
   openGame(url);
 })();

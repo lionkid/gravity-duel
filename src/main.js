@@ -217,6 +217,13 @@
       if (menus.screen === 'lan' && !app.net.ws) menus.render(true);
     }).catch(() => { /* an older server without discovery */ });
   }, 1200);
+  // Heartbeat: the desktop app on macOS shuts its server down once no game page has checked in for a while.
+  if (app.net && app.net.supported) {
+    const ping = () => { fetch('/api/ping', { cache: 'no-store' }).catch(() => { /* server closed */ }); };
+    ping();
+    setInterval(ping, 30000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) ping(); });
+  }
   function lanLeave() {
     if (app.net) app.net.close();
     app.lanNote = '';

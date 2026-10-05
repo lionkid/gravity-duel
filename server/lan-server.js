@@ -177,8 +177,12 @@ function createServer(port, opts) {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify(obj));
   };
+  let lastSeen = Date.now();
   const server = http.createServer((req, res) => {
+    lastSeen = Date.now();
     const url = req.url.split('?')[0];
+    // /api/ping: an open game page checks in now and then, so the launcher knows it is still in use.
+    if (url === '/api/ping') { res.writeHead(204, { 'Cache-Control': 'no-store' }); res.end(); return; }
     // /api/info identifies a running Gravity Duel server (the launcher uses it to avoid starting twice).
     if (url === '/api/info') return sendJson(res, { app: 'gravity-duel', name, players: players(), addrs: lanAddresses(server.address().port) });
     // /api/rooms: the other Gravity Duel rooms heard on the LAN.
@@ -218,6 +222,8 @@ function createServer(port, opts) {
     if (mate) mate.send(JSON.stringify({ t: 'peer', on: true }));
     log(`player ${seat} joined from ${socket.remoteAddress}`);
   });
+  // How long nobody has used this server: no page requests and nobody seated in the room.
+  server.idleMs = () => (players() ? 0 : Date.now() - lastSeen);
   return server;
 }
 

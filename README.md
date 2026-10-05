@@ -6,20 +6,28 @@
 ## 執行
 
 - **Windows**：執行 `GravityDuel-Setup-1.0.0.exe` 安裝，之後從桌面或開始功能表開啟 Gravity Duel。不想安裝的話，解壓縮 `GravityDuel-1.0.0-win-x64.zip`，雙擊 `GravityDuel.exe` 也可以。
+- **macOS**：打開 `GravityDuel-1.0.0-mac.dmg`，把 Gravity Duel 拖到「應用程式」資料夾，從「應用程式」或 Launchpad 開啟。同一個檔案支援 Apple 晶片與 Intel Mac，需要 macOS 11 或更新版本。
 - **瀏覽器**：直接開啟 `index.html` 也能玩單人與雙人模式，只是沒有區域網路對戰。點一下遊戲畫面讓鍵盤輸入生效。
 
-安裝程式沒有數位簽章，第一次執行時 Windows SmartScreen 可能顯示「Windows 已保護您的電腦」，按「其他資訊」→「仍要執行」即可。需要 64 位元的 Windows 10 或更新版本。
+兩個版本都沒有數位簽章，第一次開啟會被系統擋下一次：
+
+- **Windows**：SmartScreen 顯示「Windows 已保護您的電腦」時，按「其他資訊」→「仍要執行」。需要 64 位元的 Windows 10 或更新版本。
+- **macOS**：出現「無法打開」的警告時先按「完成」，到「系統設定」→「隱私權與安全性」，在「安全性」區塊按 Gravity Duel 旁的「強制打開」，再確認一次即可。macOS 14 以前也可以按住 Control 點 App 選「打開」。
+
+Release 頁面可以下載這些檔案；也可以自己建置，見下方〈打包桌面版〉。
 
 ## 區域網路對戰
 
-### 用 Windows 版（建議）
+### 用 Windows 或 macOS 版（建議）
 
-1. 兩台電腦都安裝並開啟 Gravity Duel，選「區域網路對戰」。
+1. 兩台電腦都安裝並開啟 Gravity Duel，選「區域網路對戰」。Windows 與 Mac 可以互相對戰。
 2. 一台按「建立房間」。另一台的大廳會在幾秒內自動列出這個房間，點一下就加入，不必輸入網址。
 3. 建立房間的是主機（PLAYER 1），負責計算整場戰鬥並選擇場景；加入的是 PLAYER 2。
 
 開啟 Gravity Duel 時，程式會在背景啟動遊戲伺服器（從連接埠 8080 開始找空的），並開一個遊戲視窗。
-如果已經有一個在執行，再開一次只會打開同一個視窗，不會重複啟動。關閉黑色的伺服器視窗就會結束遊戲。
+如果已經有一個在執行，再開一次只會打開同一個視窗，不會重複啟動。
+Windows 版關閉黑色的伺服器視窗就會結束遊戲。Mac 版的伺服器在背景執行、不佔 Dock，所有遊戲視窗關閉約 5 分鐘後自動結束，紀錄寫在 `~/Library/Logs/Gravity Duel.log`。
+Mac 上有安裝 Chrome、Edge、Brave 或 Chromium 時，遊戲會開在沒有網址列的獨立視窗，否則用預設瀏覽器。
 
 各台電腦的伺服器每秒用 UDP 廣播（連接埠 41234）宣告自己的房間，大廳每 1.2 秒更新一次列表，幾秒沒收到宣告的房間會自動消失。
 列表沒有出現時，可以在大廳下方手動輸入對方等待畫面（或伺服器視窗）上顯示的位址，例如 `http://192.168.1.20:8080`。
@@ -27,6 +35,8 @@
 安裝程式會加入一條 Windows 防火牆例外「Gravity Duel」，只開放**私人**與**網域**網路。
 如果兩台電腦看不到彼此，請確認 Windows 把目前的網路設為「私人網路」（設定 → 網路和網際網路 → 內容），公用網路不會開放。解除安裝時會一併移除這條規則。
 免安裝的 zip 版沒有防火牆規則，第一次執行時 Windows 會詢問是否允許，請勾選私人網路。
+Mac 第一次使用區域網路對戰時，macOS 會詢問是否允許 Gravity Duel 尋找區域網路上的裝置，請按「允許」，否則看不到別人的房間。之後可在「系統設定」→「隱私權與安全性」→「區域網路」更改。
+如果 Mac 開了防火牆，會再詢問是否允許「node」接受連入連線，也請允許。
 
 ### 用 Node.js
 
@@ -36,7 +46,7 @@
    畫面會列出網址，例如 `http://192.168.1.20:8080`。要換連接埠就加在後面：`node server/lan-server.js 9000`。
 2. 用瀏覽器打開那個網址（自己這台可以用 `http://localhost:8080`），選「區域網路對戰」。
 
-Windows 版與 Node.js 版可以互相看到房間並對戰。每台電腦的鍵盤左右兩側都能操作自己的機體。暫停與 KO 選單任一方按下，兩邊會一起切換。
+Windows、Mac 與 Node.js 版都可以互相看到房間並對戰。每台電腦的鍵盤左右兩側都能操作自己的機體。暫停與 KO 選單任一方按下，兩邊會一起切換。
 直接雙擊 `index.html` 或在 claude.ai 預覽中無法連線，因為那裡沒有伺服器。
 
 ## 流程
@@ -144,15 +154,20 @@ Windows 版與 Node.js 版可以互相看到房間並對戰。每台電腦的鍵
 - `src/audio.js`：合成音效。
 - `src/net.js`：區域網路連線，以及主機快照、來賓輸入的同步函式。
 - `server/lan-server.js`：區域網路伺服器，零依賴，提供網頁、轉送雙方訊息，並用 UDP 廣播互相發現房間。
-- `app/launcher.js`：Windows 版的進入點，找空的連接埠啟動伺服器並開遊戲視窗，已在執行就直接開啟。
+- `app/launcher.js`：桌面版的進入點，找空的連接埠啟動伺服器並開遊戲視窗，已在執行就直接開啟。
 - `tools/build-win.js`、`installer/gravity-duel.nsi`：打包 Windows 執行檔與安裝程式。
-- `assets/`：圖示。`tools/make-icon.mjs` 從 `icon.svg` 產生 `icon.png` 與 `icon.ico`。
+- `tools/build-mac.js`：打包 macOS 的 App 與 DMG。
+- `assets/`：圖示。`tools/make-icon.mjs` 從 `icon.svg` 產生 `icon.png`、`icon.ico` 與 `icon.icns`。
 - `src/screens.js`：標題、電腦強度、選機體、武裝、場景、暫停、KO、說明等選單畫面。
 - `src/touch.js`：畫面上的按鈕手把，送出的指令與鍵盤相同。
 - `src/main.js`：主迴圈、畫面流程、視角切換、記住選擇。
 - `tests/`：`for t in physics combat ai net balance lan-server; do node tests/$t.test.js; done`
 
-## 打包 Windows 版
+## 打包桌面版
+
+版本號取自 `package.json`。`build/` 與 `dist/` 不放進 git。
+
+### Windows
 
 在 Linux 或 macOS 上建置，需要 Node.js 20 以上、`curl`、`unzip`、`zip` 與 `makensis`（NSIS 3）：
 
@@ -175,7 +190,19 @@ npm run build:win
 3. 設定圖示與版本資訊。
 4. 把遊戲檔案放在 exe 旁邊，交給 NSIS 打包。
 
-版本號取自 `package.json`。`build/` 與 `dist/` 不放進 git。
+### macOS
+
+```
+npm run build:mac
+```
+
+輸出 `dist/GravityDuel-1.0.0-mac.dmg`（約 73 MB）。
+
+- **在 Mac 上建置**：只需要 Node.js 20 以上，會用內建的 `hdiutil` 製作 DMG。
+- **在 Linux 上建置**：另外需要 `genisoimage` 與 [libdmg-hfsplus](https://github.com/fanquake/libdmg-hfsplus) 的 `dmg` 工具（放在 PATH，或用 `DMG_TOOL=/path/to/dmg` 指定）。
+
+App 裡放的是官方 Apple 晶片與 Intel 兩種 Node 執行檔，原封不動，保留 Node.js 官方的 Apple 簽章與公證。
+`Contents/MacOS/GravityDuel` 是一小段 shell script，依晶片選擇其中一個執行 `app/launcher.js`。下載時會用官方的 SHASUMS256 驗證檔案。
 
 ## 里程碑
 

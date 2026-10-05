@@ -9,7 +9,8 @@
     "server": "node server/lan-server.js",
     "test": "for t in physics combat ai net balance lan-server; do node tests/$t.test.js || exit 1; done",
     "icon": "node tools/make-icon.mjs",
-    "build:win": "node tools/build-win.js"
+    "build:win": "node tools/build-win.js",
+    "build:mac": "node tools/build-mac.js"
   },
   "devDependencies": {
     "postject": "^1.0.0-alpha.6",
