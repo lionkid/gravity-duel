@@ -48,6 +48,7 @@
       guarding: false,
       dashT: 0, dashCd: 0, dashX: 0, dashY: 0,
       landLag: 0, coyote: 0, jumpBuf: 0, dropT: 0, regenDelay: 0, downHold: 0,
+      atkBuf: 0, dashBuf: 0, swBuf: 0,   // buffered presses waiting for a cooldown to end
       walkPhase: 0, landSquash: 0,
       hitstun: 0, actionLock: 0, ko: false,
       state: 'idle',
@@ -91,8 +92,9 @@
   }
 
   function tryDash(world, f, inp, dx, dy) {
-    if (!inp.pressed.dash || f.dashCd > 0 || f.overheat || f.landLag > 0) return;
+    if (f.dashBuf <= 0 || f.dashCd > 0 || f.overheat || f.landLag > 0) return;
     if (f.fuel < T.dashCost) return;
+    f.dashBuf = 0;
     f.dashT = T.dashTime;
     f.dashCd = T.dashCooldown;
     f.dashX = dx;
@@ -305,6 +307,10 @@
     // A stunned or downed fighter ignores the controls but still obeys physics.
     if (f.hitstun > 0 || f.ko) inp = IDLE_INPUT;
     if (inp.pressed.up) f.jumpBuf = T.jumpBuffer;
+    // Input buffer: a press made slightly early is kept until the action can happen.
+    f.atkBuf = inp.pressed.attack ? T.inputBuffer : Math.max(0, f.atkBuf - dt);
+    f.dashBuf = inp.pressed.dash ? T.inputBuffer : Math.max(0, f.dashBuf - dt);
+    f.swBuf = inp.pressed.switch ? T.inputBuffer : Math.max(0, f.swBuf - dt);
 
     if (world.stage.gravity > 0) updateEarth(world, f, inp, dt);
     else updateSpace(world, f, inp, dt);

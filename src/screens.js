@@ -389,7 +389,7 @@
         <div class="stage-cards">${card('earth')}${card('space')}</div>
         <div class="matchup">${mu(1)}${mu(2)}</div>
         <p class="keys-hint"><span>任一玩家 ${kbd(1, 'left')}${kbd(1, 'right')} 或 ${kbd(2, 'left')}${kbd(2, 'right')} 切換場景 · ${kbd(1, 'sub')} / ${kbd(2, 'sub')} 返回</span>
-          <button class="go" data-act="start">開始對戰 <kbd>F</kbd> <kbd>Num 1</kbd> <kbd>Enter</kbd></button></p>`;
+          <button class="go" data-act="start">開始對戰 ${kbd(1, 'attack')} ${kbd(2, 'attack')} <kbd>Enter</kbd></button></p>`;
     }
 
     html_cpu() {

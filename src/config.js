@@ -65,6 +65,7 @@
     landLag: 0.12,
     dropThroughTime: 0.25,
     dropHoldTime: 0.2,        // hold down this long on a platform to drop through it
+    inputBuffer: 0.15,        // attack, dash and swap pressed this early still fire the moment they are ready
     softPushMax: 12,          // max px per step when two mechs overlap on Earth
     space: {
       drag: 0.15,             // light passive drag so matches stay readable
@@ -93,7 +94,8 @@
       earth: 'good', space: 'even', earthNote: '略微下墜，近中距離壓制', spaceNote: '直線飛行，但單發傷害低', note: '按住連射，60 發' },
     { id: 'grenade', name: 'CRACKER', zh: '榴彈', kind: 'projectile', dmg: 90, speed: 560, g: 1.5, cooldown: 0.9, energy: 0, ammo: 6, reload: 2.0,
       knock: 340, stun: 0.4, radius: 7, color: '#7fff7f', blast: 150, blastDmg: 75, selfDamage: true, fuse: 3.0, lob: -35, shootable: true, lifetime: 6, aimSpread: 25,
-      earth: 'good', space: 'bad', earthNote: '拋物線越過平台，落地爆炸', spaceNote: '無法拋投，直直飛走', note: '爆風半徑 150，也會炸到自己' },
+      wallBurst: true,
+      earth: 'good', space: 'bad', earthNote: '拋物線越過平台，落地爆炸', spaceNote: '無法拋投，撞到場地邊界才爆', note: '爆風半徑 150，碰到地面或邊界就爆，也會炸到自己' },
   ];
   GD.MELEE = [
     { id: 'saber', name: 'BEAM SABER', zh: '光束軍刀', kind: 'melee', style: 'saber', dmg: 220, windup: 0.10, active: 0.15, recovery: 0.30,
@@ -129,16 +131,20 @@
   };
 
   // Keyboard bindings use KeyboardEvent.code so they are layout independent.
-  // P2 accepts both numpad keys and a laptop-friendly set at the same time.
+  // Each player's actions sit in one compact 2x3 block next to their movement keys, same shape for both:
+  //   switch dash      P1  R T     P2  Num4 Num5  or  O P
+  //   attack vulcan        F G         Num1 Num2      L ;
+  //   guard                V           Num0           .
+  // P2 accepts the numpad block and the laptop block at the same time.
   GD.BINDINGS = {
     1: {
       up: ['KeyW'], down: ['KeyS'], left: ['KeyA'], right: ['KeyD'],
-      attack: ['KeyF'], sub: ['KeyG'], guard: ['KeyH'], switch: ['KeyR'], dash: ['ShiftLeft'],
+      attack: ['KeyF'], sub: ['KeyG'], switch: ['KeyR'], dash: ['KeyT'], guard: ['KeyV'],
     },
     2: {
       up: ['ArrowUp'], down: ['ArrowDown'], left: ['ArrowLeft'], right: ['ArrowRight'],
-      attack: ['Numpad1', 'KeyK'], sub: ['Numpad2', 'KeyL'], guard: ['Numpad3', 'Semicolon'],
-      switch: ['Numpad5', 'KeyO'], dash: ['Numpad0', 'Slash'],
+      attack: ['Numpad1', 'KeyL'], sub: ['Numpad2', 'Semicolon'], switch: ['Numpad4', 'KeyO'],
+      dash: ['Numpad5', 'KeyP'], guard: ['Numpad0', 'Period'],
     },
   };
 
@@ -150,7 +156,7 @@
 
   GD.KEY_LABELS = {
     ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', ShiftLeft: 'L-Shift',
-    Semicolon: ';', Slash: '/',
+    Semicolon: ';', Slash: '/', Period: '.',
   };
   GD.keyLabel = function (code) {
     if (GD.KEY_LABELS[code]) return GD.KEY_LABELS[code];

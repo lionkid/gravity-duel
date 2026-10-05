@@ -96,6 +96,17 @@ test('pushing an opponent into the wall keeps both inside the arena', () => {
   assert.ok(Math.abs(a.x - b.x) >= (a.w + b.w) / 2 - 1e-6);
 });
 
+test('a dash pressed just before its cooldown ends still happens', () => {
+  const w = GD.createWorld('earth', 'ax01', 'zr06');
+  const f = w.fighters[0];
+  run(w, 1, (i) => Object.assign(idle(), { dash: true, pressed: { dash: true } }));
+  run(w, Math.round((GD.TUNING.dashCooldown - 0.1) * 60));
+  const before = f.fuel;
+  run(w, 1, () => Object.assign(idle(), { dash: true, pressed: { dash: true } }));
+  run(w, 10);
+  assert.ok(f.fuel < before - 10, 'second dash did not fire');
+});
+
 test('Earth dash moves quickly and costs fuel', () => {
   const w = GD.createWorld('earth', 'ax01', 'zr06');
   const f = w.fighters[0];

@@ -295,4 +295,86 @@ test('every weapon has a weakness in at least one stage or resource', () => {
   }
 });
 
+// ---- grenade boundary bursts ----
+test('grenade bursts when it reaches the side wall', () => {
+  const w = GD.createWorld('space', 'ax01', 'zr06', lo('grenade'));
+  const a = w.fighters[0];
+  place(w, 860, 100);
+  a.facing = 1;
+  const p = GD.combatInternals.spawnProjectile(w, a, GD.weaponById('grenade'), 0);
+  run(w, 20);
+  const boom = w.events.find((e) => e.type === 'explode');
+  assert.ok(boom, 'no explosion at the wall');
+  assert.ok(Math.abs(boom.x - GD.ARENA.w) < 1, 'exploded at x ' + boom.x);
+  assert.ok(!w.projectiles.includes(p));
+});
+
+test('grenade bursts at the top boundary when lobbed into it', () => {
+  const w = GD.createWorld('space', 'ax01', 'zr06', lo('grenade'));
+  const a = w.fighters[0];
+  place(w, 400, 900);
+  a.y = 200;
+  GD.combatInternals.spawnProjectile(w, a, GD.weaponById('grenade'), -75);
+  run(w, 30);
+  const boom = w.events.find((e) => e.type === 'explode');
+  assert.ok(boom && Math.abs(boom.y - GD.ARENA.ceilingY) < 1, 'top burst ' + (boom && boom.y));
+});
+
+test('other shells still leave the arena without exploding', () => {
+  const w = GD.createWorld('space', 'ax01', 'zr06', lo('bazooka'));
+  const a = w.fighters[0];
+  place(w, 900, 100);
+  a.facing = 1;
+  GD.combatInternals.spawnProjectile(w, a, GD.weaponById('bazooka'), 0);
+  run(w, 30);
+  assert.ok(!w.events.some((e) => e.type === 'explode'));
+  assert.strictEqual(w.projectiles.length, 0);
+});
+
+// ---- input buffer ----
+test('an attack pressed just before the cooldown ends still fires', () => {
+  const w = GD.createWorld('space', 'ax01', 'zr06', lo('bazooka'));
+  place(w, 100, 900);
+  const f = w.fighters[0];
+  run(w, 1, () => tap('attack'));
+  const cd = f.cooldown;
+  run(w, Math.round((cd - 0.1) * 60));           // 0.1 s left on the cooldown
+  run(w, 1, () => tap('attack'));
+  run(w, 10);
+  assert.strictEqual(w.events.filter((e) => e.type === 'fire').length, 2, 'early press was lost');
+});
+
+test('a press far too early is not stored', () => {
+  const w = GD.createWorld('space', 'ax01', 'zr06', lo('bazooka'));
+  place(w, 100, 900);
+  run(w, 1, () => tap('attack'));
+  run(w, 5);
+  run(w, 1, () => tap('attack'));                // ~1 s of cooldown left
+  run(w, 90);
+  assert.strictEqual(w.events.filter((e) => e.type === 'fire').length, 1);
+});
+
+test('a swap pressed in the last moment of its cooldown goes through without a denied flash', () => {
+  const w = GD.createWorld('space', 'ax01', 'zr06', lo('beam', 'saber'));
+  const f = w.fighters[0];
+  run(w, 1, () => tap('switch'));
+  run(w, Math.round((GD.COMBAT.switchCooldown - 0.08) * 60));
+  run(w, 1, () => tap('switch'));
+  assert.strictEqual(f.switchDenied, 0);
+  run(w, 10);
+  assert.strictEqual(f.mode, 'ranged');
+});
+
+// ---- bindings ----
+test('the two players never share a key, and each action has a key', () => {
+  const seen = new Map();
+  for (const p of [1, 2]) for (const [a, codes] of Object.entries(GD.BINDINGS[p])) {
+    assert.ok(codes.length > 0, `P${p} ${a}`);
+    for (const c of codes) {
+      assert.ok(!seen.has(c) || seen.get(c) === p, `${c} used by both players`);
+      seen.set(c, p);
+    }
+  }
+});
+
 console.log(`\n${passed} tests passed`);

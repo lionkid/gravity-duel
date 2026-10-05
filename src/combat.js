@@ -92,11 +92,12 @@
   function tryAttack(world, f, inp) {
     const w = GD.activeWeapon(f);
     if (f.cooldown > 0 || f.switchLag > 0 || busy(f)) return;
-    const wants = w.auto ? inp.attack : !!inp.pressed.attack;
+    const wants = w.auto ? inp.attack : f.atkBuf > 0;
     if (!wants) return;
 
     if (w.kind === 'melee') {
       const dashing = f.dashT > 0;
+      f.atkBuf = 0;
       f.melee = { t: 0, hit: false, range: w.range + (dashing ? w.dashRange : 0), w };
       f.actionLock = w.windup + w.active;
       f.cooldown = w.windup + w.active + w.recovery;
@@ -111,6 +112,7 @@
     }
     const angle = GD.aimAngle(world, f, w, inp);
     f.lastAim = angle;
+    f.atkBuf = 0;
     spawnProjectile(world, f, w, angle);
     if (w.ammo !== Infinity) f.ammo[w.id] -= 1;
     f.energy -= w.energy;
@@ -131,11 +133,11 @@
   }
 
   function trySwitch(world, f, inp) {
-    if (!inp.pressed.switch || f.melee || f.hitstun > 0 || f.ko) return;
-    if (f.switchCd > 0) {
-      f.switchDenied = 0.35;
-      return;
-    }
+    // A press is denied (HUD flash) only when it is clearly early; one made in the last
+    // moments of the cooldown waits in the buffer and goes through when the cooldown ends.
+    if (inp.pressed.switch && f.switchCd > GD.TUNING.inputBuffer) f.switchDenied = 0.35;
+    if (f.swBuf <= 0 || f.switchCd > 0 || f.melee || f.hitstun > 0 || f.ko) return;
+    f.swBuf = 0;
     f.mode = f.mode === 'melee' ? 'ranged' : 'melee';
     f.switchLag = C.switchLag;
     f.switchCd = C.switchCooldown;
@@ -293,6 +295,16 @@
             if (w.blast) explode(world, p, null); else { p.dead = true; emit(world, 'ricochet', { x: p.x, y: p.y, color: w.color }); }
             continue;
           }
+        }
+      }
+      // Grenades burst on the arena boundary: side walls, the top edge and, in space, the bottom.
+      if (w.wallBurst) {
+        const top = A.ceilingY, bottom = earth ? A.groundY : A.h;
+        if (p.x <= 0 || p.x >= A.w || p.y <= top || p.y >= bottom) {
+          p.x = Math.max(0, Math.min(A.w, p.x));
+          p.y = Math.max(top, Math.min(bottom, p.y));
+          explode(world, p, null);
+          continue;
         }
       }
       if (w.fuse && !earth && p.life >= w.fuse) { explode(world, p, null); continue; }
