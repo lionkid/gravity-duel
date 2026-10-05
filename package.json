@@ -1,0 +1,18 @@
+{
+  "name": "gravity-duel",
+  "version": "1.0.0",
+  "description": "Two-player mech duel where gravity shapes every shot. Single player, same-PC versus and LAN play.",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "node app/launcher.js",
+    "server": "node server/lan-server.js",
+    "test": "for t in physics combat ai net balance lan-server; do node tests/$t.test.js || exit 1; done",
+    "icon": "node tools/make-icon.mjs",
+    "build:win": "node tools/build-win.js"
+  },
+  "devDependencies": {
+    "postject": "^1.0.0-alpha.6",
+    "resedit": "^2.0.3"
+  }
+}

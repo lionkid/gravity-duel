@@ -45,6 +45,7 @@
       this.lcur = { 1: { row: 0, col: 0 }, 2: { row: 0, col: 0 } };
       this.advanceT = 0;
       this.helpFrom = 'title';
+      this.lanCursor = 0;
       for (const name of ['title', 'cpu', 'lan', 'select', 'loadout', 'stage', 'pause', 'ko', 'help']) {
         const el = document.createElement('div');
         el.className = `scr scr-${name}`;
@@ -107,7 +108,7 @@
       switch (id) {
         case 'solo': this.act.setMode('solo'); this.go('cpu'); break;
         case 'versus': this.act.setMode('versus'); this.go('select'); break;
-        case 'lan': this.act.setMode('lan'); this.go('lan'); this.act.lanConnect(); break;
+        case 'lan': this.act.setMode('lan'); this.lanCursor = 0; this.go('lan'); break;
         case 'view': this.act.toggleView(); this.render(); break;
         case 'sound': this.act.toggleSound(); this.render(); break;
         case 'help': this.go('help'); break;
@@ -174,10 +175,18 @@
           else if (pr.sub) this.go('title');
           break;
         }
-        case 'lan':
-          if (pr.attack) this.act.lanConnect();
+        case 'lan': {
+          if (this.app.net.ws) {                     // in a room: back leaves the room
+            if (pr.sub) { this.act.lanLeave(); this.render(); }
+            break;
+          }
+          const items = this.lanItems();
+          if (pr.up) { this.lanCursor = (this.lanCursor + items.length - 1) % items.length; this.render(); }
+          if (pr.down) { this.lanCursor = (this.lanCursor + 1) % items.length; this.render(); }
+          if (pr.attack) this.lanPick(items[Math.min(this.lanCursor, items.length - 1)]);
           else if (pr.sub) this.activate('title');
           break;
+        }
         case 'select': if (!this.lan() || p === this.me()) this.navSelect(p, pr); break;
         case 'loadout': if (!this.lan() || p === this.me()) this.navLoadout(p, pr); break;
         case 'stage': if (!this.guest()) this.navStage(pr); break;
@@ -246,7 +255,7 @@
         if (MENUS[this.screen]) this.activate(MENUS[this.screen][this.cursor[this.screen]].id);
         else if (this.screen === 'help') this.go(this.helpFrom);
         else if (this.screen === 'cpu') this.go('select');
-        else if (this.screen === 'lan') this.act.lanConnect();
+        else if (this.screen === 'lan' && !this.app.net.ws) this.lanPick(this.lanItems()[Math.min(this.lanCursor, this.lanItems().length - 1)]);
         else if ((this.screen === 'select' || this.screen === 'loadout') && this.lan()) this.setReady(this.me(), true);
         else if (this.screen === 'select' || this.screen === 'loadout') { this.ready = { 1: true, 2: false }; this.setReady(2, true); }
         else if (this.screen === 'stage' && !this.guest()) this.act.startBattle();
@@ -293,20 +302,32 @@
         case 'ready': if (!this.lan() || p === this.me()) this.setReady(p, !this.ready[p]); break;
         case 'stage': if (!this.guest()) { this.app.stageId = id; this.act.picksChanged(); this.render(); } break;
         case 'start': if (!this.guest()) this.act.startBattle(); break;
-        case 'lanretry': this.act.lanConnect(); break;
+        case 'lanroom': this.lanPick(this.lanItems()[Number(id)]); break;
+        case 'lanmanual': {
+          const box = this.root.querySelector('#lanAddr');
+          const v = box ? box.value.trim() : '';
+          if (v) this.act.lanConnect(/^https?:\/\//.test(v) ? v : `http://${v.includes(':') ? v : v + ':8080'}`);
+          break;
+        }
+        case 'lanleave': this.act.lanLeave(); this.render(); break;
         case 'level': this.pickLevel(Number(id)); this.go('select'); break;
         case 'back': this.go(this.helpFrom); break;
       }
     }
 
     // ---- rendering ----
-    render() {
+    render(silent) {
       // Menu blips: a new screen confirms, a change on the same screen is a cursor move.
-      if (this.act.sfx && this.screen !== 'battle') this.act.sfx(this.lastScreen !== this.screen ? 'menuOk' : 'menuMove');
+      if (!silent && this.act.sfx && this.screen !== 'battle') this.act.sfx(this.lastScreen !== this.screen ? 'menuOk' : 'menuMove');
       this.lastScreen = this.screen;
       for (const el of this.root.children) el.hidden = el.dataset.screen !== this.screen;
       const el = this.root.querySelector(`[data-screen="${this.screen}"]`);
+      // Keep whatever the player is typing in the lobby's address box across re-renders.
+      const box = el && el.querySelector('#lanAddr');
+      const typed = box ? { v: box.value, focus: document.activeElement === box } : null;
       if (el) el.innerHTML = this['html_' + this.screen]();
+      const nbox = el && el.querySelector('#lanAddr');
+      if (nbox && typed) { nbox.value = typed.v; if (typed.focus) nbox.focus(); }
     }
 
     menuHtml(name) {
@@ -464,34 +485,69 @@
         <p class="keys-hint"><span>${kbd(1, 'up')}${kbd(1, 'down')} 或 ${kbd(2, 'up')}${kbd(2, 'down')} 選擇 · ${kbd(1, 'attack')} / <kbd>Enter</kbd> 確認 · ${kbd(1, 'sub')} 返回</span></p>`;
     }
 
+    // Lobby entries: open a room on this server, or join one heard on the LAN.
+    lanItems() {
+      const list = [{ kind: 'create' }];
+      const info = this.app.lanRooms || { rooms: [] };
+      if (info.self && info.self.players > 0) list.push({ kind: 'join', room: { name: `${info.self.name}（這台伺服器）`, url: '', players: info.self.players } });
+      for (const r of info.rooms || []) if (r.players > 0) list.push({ kind: 'join', room: r });
+      return list;
+    }
+
+    lanPick(item) {
+      if (!item) return;
+      if (item.kind === 'create') this.act.lanConnect('');
+      else if (item.room.players < 2) this.act.lanConnect(item.room.url);
+    }
+
     html_lan() {
       const net = this.app.net;
       const note = this.app.lanNote ? `<p class="lan-note">${this.app.lanNote}</p>` : '';
       let body;
       if (!net.supported) {
-        body = `<p>區域網路對戰需要透過遊戲內附的小型伺服器開啟。目前這個頁面是直接開檔或在預覽中執行，無法連線。</p>
+        body = `<p>區域網路對戰需要用 Gravity Duel 程式開啟遊戲。目前這個頁面是直接開檔或在預覽中執行，無法連線。</p>
           <ol>
-            <li>在其中一台電腦安裝 Node.js，在專案資料夾執行：<code>node server/lan-server.js</code></li>
-            <li>畫面會顯示網址，例如 <code>http://192.168.1.20:8080</code>。</li>
-            <li>兩台電腦都用瀏覽器打開那個網址，選「區域網路對戰」。</li>
+            <li><b>Windows</b>：執行安裝檔 <code>GravityDuel-Setup.exe</code>，從桌面的 Gravity Duel 圖示開啟。</li>
+            <li><b>其他系統</b>：安裝 Node.js 後在專案資料夾執行 <code>node server/lan-server.js</code>，用瀏覽器打開它顯示的網址。</li>
+            <li>兩台電腦都選「區域網路對戰」，一台建立房間，另一台會在列表看到它。</li>
           </ol>
-          <p class="muted">兩台電腦要在同一個 Wi-Fi 或區域網路。先連上的是主機（PLAYER 1）。</p>`;
+          <p class="muted">兩台電腦要在同一個 Wi-Fi 或區域網路。</p>`;
+      } else if (!net.ws) {
+        // Not in a room yet: the room browser.
+        const items = this.lanItems();
+        this.lanCursor = Math.min(this.lanCursor, items.length - 1);
+        const rows = items.map((it, i) => {
+          const on = i === this.lanCursor ? 'on' : '';
+          if (it.kind === 'create') {
+            return `<button class="room ${on}" data-act="lanroom" data-id="${i}"><b>＋ 建立房間</b><span>在這台電腦開房，等別人加入（你是主機）</span></button>`;
+          }
+          const full = it.room.players >= 2;
+          return `<button class="room ${on} ${full ? 'full' : ''}" data-act="lanroom" data-id="${i}"><b>${it.room.name}</b>
+            <span>${it.room.url ? it.room.url.replace('http://', '') : '同一台伺服器'} · ${full ? '已滿' : '等待對手中，按下加入'}</span></button>`;
+        }).join('');
+        const searching = items.length === 1 ? '<p class="muted">正在搜尋同一個網路裡的房間… 對方建立房間後會自動出現在這裡。</p>' : '';
+        body = `<div class="rooms">${rows}</div>${searching}
+          <div class="manual"><label for="lanAddr">找不到房間時，輸入對方畫面上的位址：</label>
+            <span><input id="lanAddr" type="text" inputmode="url" placeholder="192.168.1.20:8080" autocomplete="off">
+            <button class="readybtn" data-act="lanmanual">加入</button></span></div>`;
       } else if (net.status === 'connecting') {
         body = '<p class="lan-big">連線到伺服器中…</p>';
       } else if (net.status === 'online' && !net.peer) {
-        body = `<p class="lan-big">你是 PLAYER ${net.player}${net.isHost ? '（主機）' : ''}，等待對手連線…</p>
-          <p>請另一台電腦用瀏覽器打開：</p>${net.links.map((u) => `<p class="lan-url">${u}</p>`).join('')}`;
+        body = `<p class="lan-big">你是 PLAYER ${net.player}${net.isHost ? '（主機）' : ''}，等待對手加入…</p>
+          <p>同一個網路裡的玩家打開 Gravity Duel 的「區域網路對戰」，就會在列表看到這個房間。也可以讓對方輸入：</p>
+          ${net.links.map((u) => `<p class="lan-url">${u.replace('http://', '')}</p>`).join('')}`;
       } else if (net.status === 'online') {
         body = `<p class="lan-big">對手已連線，準備進入選擇機體。</p>`;
       } else if (net.status === 'full') {
         body = '<p class="lan-big">房間已滿，已經有兩位玩家在線上。</p>';
       } else {
-        body = `<p class="lan-big">沒有連上伺服器。</p><p>請確認伺服器還在執行，然後按 ${kbd(1, 'attack')} 重試。</p>`;
+        body = `<p class="lan-big">沒有連上伺服器。</p><p>請確認對方的 Gravity Duel 還開著，再按返回回到房間列表。</p>`;
       }
       return `<div class="scr-head"><h2>LAN · 區域網路對戰</h2><span class="step">兩台電腦各自用自己的鍵盤或按鈕操作</span></div>
         <div class="modal panel lan">${note}${body}
-          <div class="lan-actions"><button class="readybtn" data-act="lanretry">重新連線 ${kbd(1, 'attack')}</button>
-          <button class="readybtn" data-act="menu" data-id="title">返回標題 ${kbd(1, 'sub')}</button></div></div>`;
+          <div class="lan-actions">${net.ws || net.status === 'full' || net.status === 'error' || net.status === 'closed'
+            ? `<button class="readybtn" data-act="lanleave">${net.ws ? '離開房間' : '回到房間列表'} ${kbd(1, 'sub')}</button>`
+            : `<button class="readybtn" data-act="menu" data-id="title">返回標題 ${kbd(1, 'sub')}</button>`}</div></div>`;
     }
 
     html_pause() {

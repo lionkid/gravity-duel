@@ -160,8 +160,12 @@
           menus.go('lan');
         }
         break;
+      case 'full':
+        app.lanNote = '這個房間已經有兩位玩家了。';
+        break;
       case 'closed':
-        if (menus.screen !== 'title') { app.lanNote = '與伺服器的連線中斷。'; menus.go('lan'); }
+        if (app.net.status === 'full') { menus.render(); break; }
+        if (menus.screen !== 'title') { app.lanNote = app.lanNote || '與房間的連線中斷。'; menus.go('lan'); }
         break;
       case 'go':
         menus.go(m.screen);
@@ -196,11 +200,23 @@
     }
   }
   if (app.net) app.net.onMessage = onNet;
-  function lanConnect() {
+  function lanConnect(base) {
     app.lanNote = '';
-    if (!app.net.ws) app.net.connect();
+    if (!app.net.ws) app.net.connect(base);
     menus.render();
   }
+  // Room browser: while the lobby is open, ask this page's server which rooms it hears on the LAN.
+  let roomsSeen = '';
+  setInterval(() => {
+    if (!lan() || menus.screen !== 'lan' || !app.net.supported || app.net.ws) return;
+    fetch('/api/rooms', { cache: 'no-store' }).then((r) => r.json()).then((data) => {
+      const key = JSON.stringify(data);
+      if (key === roomsSeen) return;
+      roomsSeen = key;
+      app.lanRooms = data;
+      if (menus.screen === 'lan' && !app.net.ws) menus.render(true);
+    }).catch(() => { /* an older server without discovery */ });
+  }, 1200);
   function lanLeave() {
     if (app.net) app.net.close();
     app.lanNote = '';

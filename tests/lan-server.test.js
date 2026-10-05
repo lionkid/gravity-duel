@@ -73,6 +73,27 @@ function client(port) {
 
   a.close(); d.close(); c.close();
   server.close();
+
+  // Discovery: two servers announce on crossed test ports over loopback and list each other.
+  const A = createServer(0, { name: 'alpha', udpPort: 41297, sendPort: 41298, targets: ['127.0.0.1'] });
+  const B = createServer(0, { name: 'beta', udpPort: 41298, sendPort: 41297, targets: ['127.0.0.1'] });
+  await new Promise((r) => A.listen(0, '127.0.0.1', r));
+  await new Promise((r) => B.listen(0, '127.0.0.1', r));
+  const host = client(A.address().port);          // someone opens a room on alpha
+  await host.ready; await host.next();
+  await new Promise((r) => setTimeout(r, 2300));
+  const roomsOnB = JSON.parse((await get(B.address().port, '/api/rooms')).body);
+  const roomsOnA = JSON.parse((await get(A.address().port, '/api/rooms')).body);
+  assert.deepStrictEqual(roomsOnB.rooms, [{ name: 'alpha', url: `http://127.0.0.1:${A.address().port}`, players: 1 }]);
+  assert.strictEqual(roomsOnA.rooms.length, 1);
+  assert.strictEqual(roomsOnA.rooms[0].name, 'beta');
+  assert.strictEqual(roomsOnA.rooms[0].players, 0);
+  const info = JSON.parse((await get(A.address().port, '/api/info')).body);
+  assert.strictEqual(info.app, 'gravity-duel');
+  assert.strictEqual(info.players, 1);
+  ok('servers on the same network find each other and report how many players wait in each room');
+  host.close();
+  A.close(); B.close();
   console.log(`\n${passed} tests passed`);
   process.exit(0);
 })().catch((e) => { console.error(e); process.exit(1); });

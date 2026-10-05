@@ -102,11 +102,15 @@
       return list.length ? list : [here];
     }
 
-    connect() {
+    // base: another server's address such as http://192.168.1.20:8080, or empty for this page's own server.
+    connect(base) {
       if (this.ws || !this.supported) return;
       this.status = 'connecting';
+      this.base = base || '';
+      const url = base ? `${base.replace(/^http/, 'ws').replace(/\/+$/, '')}/ws`
+        : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
       let ws;
-      try { ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`); }
+      try { ws = new WebSocket(url); }
       catch (e) { this.status = 'error'; this.emit({ t: 'status' }); return; }
       this.ws = ws;
       ws.onmessage = (ev) => {

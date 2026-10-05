@@ -5,24 +5,39 @@
 
 ## 執行
 
-直接用瀏覽器開啟 `index.html` 即可，不需要伺服器或安裝。點一下遊戲畫面讓鍵盤輸入生效。
+- **Windows**：執行 `GravityDuel-Setup-1.0.0.exe` 安裝，之後從桌面或開始功能表開啟 Gravity Duel。不想安裝的話，解壓縮 `GravityDuel-1.0.0-win-x64.zip`，雙擊 `GravityDuel.exe` 也可以。
+- **瀏覽器**：直接開啟 `index.html` 也能玩單人與雙人模式，只是沒有區域網路對戰。點一下遊戲畫面讓鍵盤輸入生效。
+
+安裝程式沒有數位簽章，第一次執行時 Windows SmartScreen 可能顯示「Windows 已保護您的電腦」，按「其他資訊」→「仍要執行」即可。需要 64 位元的 Windows 10 或更新版本。
 
 ## 區域網路對戰
 
-需要一台電腦安裝 [Node.js](https://nodejs.org/)（16 版以上），不需要安裝任何套件。
+### 用 Windows 版（建議）
 
-1. 在那台電腦的專案資料夾執行：
+1. 兩台電腦都安裝並開啟 Gravity Duel，選「區域網路對戰」。
+2. 一台按「建立房間」。另一台的大廳會在幾秒內自動列出這個房間，點一下就加入，不必輸入網址。
+3. 建立房間的是主機（PLAYER 1），負責計算整場戰鬥並選擇場景；加入的是 PLAYER 2。
 
-   ```
-   node server/lan-server.js
-   ```
+開啟 Gravity Duel 時，程式會在背景啟動遊戲伺服器（從連接埠 8080 開始找空的），並開一個遊戲視窗。
+如果已經有一個在執行，再開一次只會打開同一個視窗，不會重複啟動。關閉黑色的伺服器視窗就會結束遊戲。
 
+各台電腦的伺服器每秒用 UDP 廣播（連接埠 41234）宣告自己的房間，大廳每 1.2 秒更新一次列表，幾秒沒收到宣告的房間會自動消失。
+列表沒有出現時，可以在大廳下方手動輸入對方等待畫面（或伺服器視窗）上顯示的位址，例如 `http://192.168.1.20:8080`。
+
+安裝程式會加入一條 Windows 防火牆例外「Gravity Duel」，只開放**私人**與**網域**網路。
+如果兩台電腦看不到彼此，請確認 Windows 把目前的網路設為「私人網路」（設定 → 網路和網際網路 → 內容），公用網路不會開放。解除安裝時會一併移除這條規則。
+免安裝的 zip 版沒有防火牆規則，第一次執行時 Windows 會詢問是否允許，請勾選私人網路。
+
+### 用 Node.js
+
+任何系統只要有 [Node.js](https://nodejs.org/)（16 版以上）都可以，不需要安裝套件。
+
+1. 在專案資料夾執行 `npm start`（等同 `node app/launcher.js`，會自動開瀏覽器）或 `node server/lan-server.js`。
    畫面會列出網址，例如 `http://192.168.1.20:8080`。要換連接埠就加在後面：`node server/lan-server.js 9000`。
-2. 兩台電腦都用瀏覽器打開那個網址（執行伺服器的電腦也可以用 `http://localhost:8080`），選「區域網路對戰」。
-3. 先連上的是主機（PLAYER 1），負責計算整場戰鬥並選擇場景；後連上的是 PLAYER 2。
+2. 用瀏覽器打開那個網址（自己這台可以用 `http://localhost:8080`），選「區域網路對戰」。
 
-兩台電腦要在同一個網路。每台電腦的鍵盤左右兩側都能操作自己的機體。暫停與 KO 選單任一方按下，兩邊會一起切換。
-如果另一台連不上，請確認防火牆允許 Node.js 使用該連接埠。直接雙擊 `index.html` 或在 claude.ai 預覽中無法連線，因為那裡沒有伺服器。
+Windows 版與 Node.js 版可以互相看到房間並對戰。每台電腦的鍵盤左右兩側都能操作自己的機體。暫停與 KO 選單任一方按下，兩邊會一起切換。
+直接雙擊 `index.html` 或在 claude.ai 預覽中無法連線，因為那裡沒有伺服器。
 
 ## 流程
 
@@ -128,11 +143,39 @@
 - `src/ai.js`：電腦對手的配裝邏輯與每一步的操作，不碰 DOM。
 - `src/audio.js`：合成音效。
 - `src/net.js`：區域網路連線，以及主機快照、來賓輸入的同步函式。
-- `server/lan-server.js`：區域網路伺服器，零依賴，提供網頁並轉送雙方訊息。
+- `server/lan-server.js`：區域網路伺服器，零依賴，提供網頁、轉送雙方訊息，並用 UDP 廣播互相發現房間。
+- `app/launcher.js`：Windows 版的進入點，找空的連接埠啟動伺服器並開遊戲視窗，已在執行就直接開啟。
+- `tools/build-win.js`、`installer/gravity-duel.nsi`：打包 Windows 執行檔與安裝程式。
+- `assets/`：圖示。`tools/make-icon.mjs` 從 `icon.svg` 產生 `icon.png` 與 `icon.ico`。
 - `src/screens.js`：標題、電腦強度、選機體、武裝、場景、暫停、KO、說明等選單畫面。
 - `src/touch.js`：畫面上的按鈕手把，送出的指令與鍵盤相同。
 - `src/main.js`：主迴圈、畫面流程、視角切換、記住選擇。
 - `tests/`：`for t in physics combat ai net balance lan-server; do node tests/$t.test.js; done`
+
+## 打包 Windows 版
+
+在 Linux 或 macOS 上建置，需要 Node.js 20 以上、`curl`、`unzip`、`zip` 與 `makensis`（NSIS 3）：
+
+```
+npm install
+npm run build:win
+```
+
+輸出在 `dist/`：
+
+| 檔案 | 內容 |
+|---|---|
+| `GravityDuel-Setup-1.0.0.exe` | 安裝程式（約 22 MB） |
+| `GravityDuel-1.0.0-win-x64.zip` | 免安裝版（約 32 MB） |
+
+建置步驟：
+
+1. 下載官方的 Windows 版 `node.exe`，快取在 `build/cache`。
+2. 用 Node 的 single executable application 把 `app/launcher.js` 包進去，成為 `GravityDuel.exe`。
+3. 設定圖示與版本資訊。
+4. 把遊戲檔案放在 exe 旁邊，交給 NSIS 打包。
+
+版本號取自 `package.json`。`build/` 與 `dist/` 不放進 git。
 
 ## 里程碑
 

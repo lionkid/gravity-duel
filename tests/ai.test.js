@@ -14,7 +14,7 @@ const foe = (mech, ranged, melee) => ({ mech, ranged, melee });
 function match(l1, l2, stage, seed, limit = 120) {
   const c1 = GD.cpuChoose(l1, stage, foe('ax01', 'beam', 'saber'), seed);
   const c2 = GD.cpuChoose(l2, stage, c1, seed + 7);
-  const w = GD.createWorld(stage, c1.mech, c2.mech, { 1: c1, 2: c2 });
+  const w = GD.createWorld(stage, c1.mech, c2.mech, { 1: c1, 2: c2 }, seed * 11 + 3);
   const a1 = GD.createAI(l1, seed * 3 + 1), a2 = GD.createAI(l2, seed * 5 + 2);
   const stats = { switches: 0, vulcan: 0 };
   for (let i = 0; i < limit * 60; i++) {
@@ -78,7 +78,7 @@ test('AI input has every key and only reports presses on new holds', () => {
 test('the AI fights back: it damages an idle player within 20 s on both stages', () => {
   for (const stage of GD.STAGE_ORDER) for (const level of GD.AI_ORDER) {
     const c = GD.cpuChoose(level, stage, foe('ax01', 'beam', 'saber'), 3);
-    const w = GD.createWorld(stage, 'ax01', c.mech, { 1: { ranged: 'beam', melee: 'saber' }, 2: c });
+    const w = GD.createWorld(stage, 'ax01', c.mech, { 1: { ranged: 'beam', melee: 'saber' }, 2: c }, 9);
     const ai = GD.createAI(level, 5);
     for (let i = 0; i < 20 * 60 && !w.winner; i++) GD.stepWorld(w, [GD.IDLE_INPUT, GD.aiInput(ai, w, 2, GD.DT)], GD.DT);
     assert.ok(w.fighters[0].hp < w.fighters[0].stats.hpMax, `${level} on ${stage} never hit`);

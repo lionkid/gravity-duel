@@ -29,6 +29,8 @@
     }
 
     handleDown(e) {
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;   // typing an address
       if (this.codeMap.has(e.code)) {
         e.preventDefault(); // stop arrows/space from scrolling the page
         if (!this.down.has(e.code)) {

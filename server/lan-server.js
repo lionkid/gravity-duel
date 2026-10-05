@@ -13,15 +13,75 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const os = require('os');
+const dgram = require('dgram');
 
 const ROOT = path.resolve(__dirname, '..');
 const PORT = Number(process.env.PORT || process.argv[2] || 8080);
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const MAX_FRAME = 1 << 20;
+const DISCOVERY_PORT = 41234;           // UDP port every Gravity Duel server announces itself on
+const DISCOVERY_EVERY = 1000;           // ms between announcements
+const DISCOVERY_TTL = 3500;             // ms before a silent server drops off the list
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.json': 'application/json', '.md': 'text/markdown; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml',
 };
+
+// ---------------------------------------------------------------- LAN discovery (UDP broadcast)
+// Browsers cannot broadcast, so each server does it for its page: it announces its room once a
+// second on every network and keeps a list of the other rooms it hears. The page reads /api/rooms.
+function broadcastTargets() {
+  const out = new Set(['255.255.255.255']);
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const a of list || []) {
+      if (a.family !== 'IPv4' || a.internal || !a.netmask) continue;
+      const ip = a.address.split('.').map(Number), mask = a.netmask.split('.').map(Number);
+      out.add(ip.map((v, i) => (v & mask[i]) | (~mask[i] & 255)).join('.'));
+    }
+  }
+  return [...out];
+}
+
+function startDiscovery(info) {
+  const id = crypto.randomBytes(6).toString('hex');
+  const rooms = new Map();
+  let sock = null, timer = null;
+  const stop = () => { clearInterval(timer); if (sock) try { sock.close(); } catch (e) { /* closed */ } sock = null; };
+  try {
+    sock = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+    sock.on('error', (e) => { log(`discovery off: ${e.message}`); stop(); });
+    sock.on('message', (buf, rinfo) => {
+      let m;
+      try { m = JSON.parse(buf.toString('utf8')); } catch (e) { return; }
+      if (!m || m.app !== 'gravity-duel' || m.id === id || !Number.isInteger(m.port)) return;
+      rooms.set(`${rinfo.address}:${m.port}`, {
+        name: String(m.name || rinfo.address).slice(0, 40), url: `http://${rinfo.address}:${m.port}`,
+        players: Math.max(0, Math.min(2, m.players | 0)), seen: Date.now(),
+      });
+    });
+    sock.bind(info.udpPort || DISCOVERY_PORT, () => {
+      try { sock.setBroadcast(true); } catch (e) { /* some networks refuse broadcast */ }
+      const announce = () => {
+        if (!sock) return;
+        const msg = Buffer.from(JSON.stringify({ app: 'gravity-duel', v: 1, id, name: info.name, port: info.port(), players: info.players() }));
+        const to = info.sendPort || info.udpPort || DISCOVERY_PORT;
+        for (const target of info.targets || broadcastTargets()) sock.send(msg, to, target, () => {});
+      };
+      announce();
+      timer = setInterval(announce, DISCOVERY_EVERY);
+    });
+  } catch (e) {
+    log(`discovery off: ${e.message}`);
+  }
+  return {
+    list() {
+      const now = Date.now();
+      for (const [k, r] of rooms) if (now - r.seen > DISCOVERY_TTL) rooms.delete(k);
+      return [...rooms.values()].map(({ name, url, players }) => ({ name, url, players }));
+    },
+    close: stop,
+  };
+}
 
 // ---------------------------------------------------------------- static files
 function serveFile(req, res) {
@@ -105,10 +165,32 @@ class Peer {
 }
 
 // ---------------------------------------------------------------- room: two seats, messages relayed as-is
-function createServer(port) {
+// opts: { name, discovery: false, udpPort, sendPort, targets } (the last three exist for tests)
+function createServer(port, opts) {
+  opts = opts || {};
   const seats = { 1: null, 2: null };
   const other = (p) => seats[p === 1 ? 2 : 1];
-  const server = http.createServer(serveFile);
+  const players = () => (seats[1] ? 1 : 0) + (seats[2] ? 1 : 0);
+  const name = opts.name || os.hostname();
+  let discovery = null;
+  const sendJson = (res, obj) => {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify(obj));
+  };
+  const server = http.createServer((req, res) => {
+    const url = req.url.split('?')[0];
+    // /api/info identifies a running Gravity Duel server (the launcher uses it to avoid starting twice).
+    if (url === '/api/info') return sendJson(res, { app: 'gravity-duel', name, players: players(), addrs: lanAddresses(server.address().port) });
+    // /api/rooms: the other Gravity Duel rooms heard on the LAN.
+    if (url === '/api/rooms') return sendJson(res, { self: { name, players: players() }, rooms: discovery ? discovery.list() : [] });
+    serveFile(req, res);
+  });
+  server.on('listening', () => {
+    if (opts.discovery !== false) {
+      discovery = startDiscovery({ name, port: () => server.address().port, players, udpPort: opts.udpPort, sendPort: opts.sendPort, targets: opts.targets });
+    }
+  });
+  server.on('close', () => { if (discovery) discovery.close(); });
 
   server.on('upgrade', (req, socket) => {
     const key = req.headers['sec-websocket-key'];
@@ -161,4 +243,4 @@ if (require.main === module) {
   server.on('error', (e) => { console.error(`Cannot start on port ${PORT}: ${e.message}`); process.exit(1); });
 }
 
-module.exports = { createServer, lanAddresses, setQuiet: (q) => { quiet = q; } };
+module.exports = { createServer, lanAddresses, startDiscovery, DISCOVERY_PORT, setQuiet: (q) => { quiet = q; } };

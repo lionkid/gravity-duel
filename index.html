@@ -150,6 +150,20 @@
   .lan-url { font-family: var(--mono); font-size: 1.4em; color: var(--accent); user-select: all; }
   .lan-note { color: var(--bad) !important; }
   .lan-actions { display: flex; gap: 0.6em; flex-wrap: wrap; }
+  .rooms { display: grid; gap: 0.4em; }
+  .room { text-align: left; background: rgba(17, 24, 39, 0.92); border: 1px solid var(--line); border-radius: 0.25em; padding: 0.5em 0.8em;
+    display: grid; gap: 0.1em; cursor: pointer; }
+  .room b { font-family: var(--display); font-weight: 400; font-size: 1.05em; }
+  .room span { font-family: var(--mono); font-size: 0.8em; color: var(--muted); }
+  .room:hover { border-color: var(--accent-2); }
+  .room.on { border-color: var(--accent); background: rgba(255, 122, 26, 0.16); }
+  .room.full { opacity: 0.5; cursor: not-allowed; }
+  .manual { display: grid; gap: 0.3em; font-size: 0.85em; color: var(--muted); }
+  .manual span { display: flex; gap: 0.5em; }
+  .manual input { flex: 1; min-width: 0; font-family: var(--mono); font-size: 1em; color: var(--text); background: #0d1220;
+    border: 1px solid var(--line); border-radius: 0.25em; padding: 0.35em 0.6em; }
+  .manual input:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 1px; }
+  .manual .readybtn { margin-top: 0; padding-inline: 1.2em; }
   .lan-actions .readybtn { margin-top: 0; padding-inline: 1em; }
   .screens code, .note code { font-family: var(--mono); background: #1d2740; border: 1px solid var(--line); border-radius: 0.2em; padding: 0 0.35em; }
 
