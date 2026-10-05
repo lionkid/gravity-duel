@@ -1,0 +1,86 @@
+# Builds the Windows installer, the portable zip and the macOS disk image, then publishes them as a
+# GitHub Release tagged v<version from package.json>. Run it by hand: Actions → Release → Run workflow.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: Create the release as a draft (publish it yourself after checking)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+
+  windows:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: sudo apt-get update && sudo apt-get install -y nsis
+      - run: npm ci
+      - run: npm run build:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/*.exe
+            dist/*.zip
+          if-no-files-found: error
+
+  mac:
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run build:mac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  release:
+    needs: [windows, mac]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT: ${{ inputs.draft }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          tag="v$version"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::Release $tag already exists. Raise the version in package.json first."
+            exit 1
+          fi
+          sed "s/{{VERSION}}/$version/g" .github/release-notes.md > notes.md
+          { echo '## SHA-256'; echo; echo '```'; (cd dist && sha256sum *); echo '```'; } >> notes.md
+          draft=""
+          if [ "$DRAFT" = "true" ]; then draft="--draft"; fi
+          gh release create "$tag" dist/* --target "$GITHUB_SHA" --title "Gravity Duel $version" --notes-file notes.md $draft

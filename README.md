@@ -167,6 +167,16 @@ Windows、Mac 與 Node.js 版都可以互相看到房間並對戰。每台電腦
 
 版本號取自 `package.json`。`build/` 與 `dist/` 不放進 git。
 
+### 發布 Release
+
+到 GitHub 的 Actions →「Release」→「Run workflow」。它會：
+
+1. 先跑測試。
+2. 在 Ubuntu 上建置 Windows 安裝程式與 zip，在 macOS 上建置 DMG。
+3. 建立 `v<版本號>` 的 Release，附上三個檔案與 SHA-256。
+
+勾選 draft 會先建成草稿，確認後再自己發布。要發新版前，先把 `package.json` 的版本號調高；同版本的 Release 已存在時，workflow 會停止。說明文字的範本在 `.github/release-notes.md`。
+
 ### Windows
 
 在 Linux 或 macOS 上建置，需要 Node.js 20 以上、`curl`、`unzip`、`zip` 與 `makensis`（NSIS 3）：

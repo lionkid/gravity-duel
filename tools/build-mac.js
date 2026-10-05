@@ -138,7 +138,17 @@ step('disk image');
 const dmg = path.join(dist, `GravityDuel-${VERSION}-mac.dmg`);
 fs.rmSync(dmg, { force: true });
 if (process.platform === 'darwin') {
-  run('hdiutil', ['create', '-volname', APP, '-srcfolder', dmgRoot, '-fs', 'HFS+', '-format', 'UDZO', '-ov', dmg]);
+  // hdiutil sometimes fails with "Resource busy" on busy machines; a retry usually succeeds.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      run('hdiutil', ['create', '-volname', APP, '-srcfolder', dmgRoot, '-fs', 'HFS+', '-format', 'UDZO', '-ov', dmg]);
+      break;
+    } catch (e) {
+      if (attempt >= 4) throw e;
+      console.log(`hdiutil failed, retrying (${attempt})`);
+      execFileSync('sleep', [String(attempt * 5)]);
+    }
+  }
 } else {
   // ISO 9660 with Rock Ridge keeps long names, execute bits and the symlink; macOS mounts it as a disk.
   const iso = path.join(build, 'mac.iso');
