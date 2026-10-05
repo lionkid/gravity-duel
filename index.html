@@ -126,6 +126,20 @@
   .go { background: var(--accent); color: #0a0e17; border: 0; border-radius: 0.25em; padding: 0.45em 1em; cursor: pointer; font-family: var(--display); font-size: 1.1em; }
   .go kbd { color: var(--text); }
 
+  /* single player: CPU difficulty and the hidden opponent */
+  .scr-cpu { padding-left: 3em; background: linear-gradient(90deg, rgba(5, 7, 13, 0.9), rgba(5, 7, 13, 0.55) 50%, transparent 75%); }
+  .lvls { display: grid; gap: 0.7em; max-width: 34em; margin-top: 0.6em; }
+  .lvl { text-align: left; padding: 0.8em 1em; display: grid; gap: 0.25em; cursor: pointer; }
+  .lvl:hover { border-color: var(--accent-2); }
+  .lvl.on { border-color: var(--accent); box-shadow: 0 0 0 0.14em var(--accent); }
+  .lvl-name { font-family: var(--display); font-size: 1.35em; display: flex; gap: 0.6em; align-items: baseline; }
+  .lvl-name small { font-family: var(--mono); font-size: 0.55em; color: var(--muted); letter-spacing: 0.12em; }
+  .lvl-desc { color: var(--muted); font-size: 0.85em; }
+  .cpu .pick-name { color: var(--muted); letter-spacing: 0.2em; }
+  .cpu-rules { margin: 0; padding-left: 1.2em; font-size: 0.82em; display: grid; gap: 0.2em; }
+  .cpu-note { margin: 0; margin-top: auto; font-size: 0.75em; color: var(--muted); }
+  .why { display: flex; flex-direction: column; gap: 0.1em; color: var(--accent-2); font-size: 0.92em; border-top: 1px dashed var(--line); padding-top: 0.25em; }
+
   /* pause, KO and help */
   .scr-pause, .scr-help { align-items: center; justify-content: center; background: rgba(5, 7, 13, 0.35); }
   .modal { padding: 1.1em 1.4em; display: grid; gap: 0.8em; min-width: 18em; max-width: 92%; max-height: 92%; overflow: auto; }
@@ -167,6 +181,10 @@
   .sys { display: flex; flex-direction: column; gap: 8px; justify-content: center; }
   .sys .vbtn { width: 88px; height: 44px; }
   .pad-note { margin: 0; font-size: 12px; color: var(--muted); }
+  .cpu-pad { display: none; place-content: center; text-align: center; gap: 4px; }
+  .cpu-pad b { font-family: var(--display); font-weight: 400; color: var(--p2); font-size: 18px; }
+  body[data-mode="solo"] #pad2 { display: none; }
+  body[data-mode="solo"] .cpu-pad { display: grid; }
   @media (max-width: 760px) { .pads { grid-template-columns: 1fr; } .sys { flex-direction: row; justify-content: center; } }
 
   /* ---- below the frame ---- */
@@ -190,7 +208,7 @@
 <div class="wrap">
   <header>
     <div>
-      <div class="eyebrow">Build M3 · 選擇流程</div>
+      <div class="eyebrow">Build M3 · 單人與雙人模式</div>
       <h1>GRAVITY DUEL</h1>
     </div>
     <p class="muted">同一台電腦的雙人對戰，可以用鍵盤或畫面下方的按鈕操作。Esc 暫停。</p>
@@ -209,6 +227,7 @@
       <button type="button" tabindex="-1" class="vbtn" data-sys="Enter">確認<small>Enter</small></button>
     </div>
     <div class="pad p2" id="pad2"></div>
+    <div class="pad p2 cpu-pad"><b>CPU</b><span class="muted">單人模式中由電腦操作。<br>P1 可以用鍵盤任一側或左邊的按鈕。</span></div>
   </div>
   <p class="pad-note">按鈕和鍵盤可以混用。觸控螢幕支援多指同時按，兩人可以在平板上各用一組；滑鼠一次只能按住一個鍵。選單中方向鍵選擇、攻擊確認、火神砲返回。</p>
 
@@ -227,7 +246,8 @@
     <div class="note">
       <h2>流程</h2>
       <ul>
-        <li><b>標題</b>：開始對戰、切換 2.5D / 2D 視角、看操作說明。</li>
+        <li><b>標題</b>：單人模式對戰電腦，或雙人模式；也能切換 2.5D / 2D 視角、看操作說明。</li>
+        <li><b>電腦強度</b>：簡單、普通、困難。電腦會在你選好場景後，依場景與你的配置自己挑機體和武器。</li>
         <li><b>選擇機體</b>：兩人同時選，各自按攻擊鍵準備，雙方都準備好就自動往下。</li>
         <li><b>武裝配置</b>：遠程與近戰各選一把，右邊會顯示這把武器在地球與太空的優劣。</li>
         <li><b>選擇場景</b>：下方會列出雙方武裝在這個場景是有利還是不利。</li>
@@ -261,6 +281,7 @@
 <script src="src/combat.js"></script>
 <script src="src/render.js"></script>
 <script src="src/render3d.js"></script>
+<script src="src/ai.js"></script>
 <script src="src/screens.js"></script>
 <script src="src/touch.js"></script>
 <script src="src/main.js"></script>

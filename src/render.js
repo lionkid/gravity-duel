@@ -354,7 +354,7 @@
         ctx.beginPath();
         ctx.ellipse(pos[i].x, footY + 1, 26, 4, 0, 0, Math.PI * 2);
         ctx.fill();
-        this.drawMech(f, pos[i].x, pos[i].y, f.facing, null);
+        this.drawMech(f, pos[i].x, pos[i].y, f.facing, f.silhouette ? '#1c2334' : null);
       });
       ctx.restore();
     }
@@ -627,7 +627,7 @@
       ctx.fillText('K.O.', W / 2, H / 2 - 4);
       ctx.fillStyle = '#e7ecf5';
       ctx.font = `16px ${MONO}`;
-      ctx.fillText(`PLAYER ${winner.player} · ${winner.mech.code} ${winner.mech.name} WINS`, W / 2, H / 2 + 26);
+      ctx.fillText(`${winner.label || 'PLAYER ' + winner.player} · ${winner.mech.code} ${winner.mech.name} WINS`, W / 2, H / 2 + 26);
       ctx.textAlign = 'left';
     }
 
@@ -670,7 +670,7 @@
         ctx.font = `13px ${MONO}`;
         ctx.fillStyle = '#e7ecf5';
         ctx.textAlign = left ? 'left' : 'right';
-        const name = `P${f.player} · ${f.mech.code} ${f.mech.name}`;
+        const name = `${f.label || 'P' + f.player} · ${f.mech.code} ${f.mech.name}`;
         ctx.fillText(name, left ? x : x + barW, 20);
         ctx.fillStyle = '#8b95ad';
         ctx.textAlign = left ? 'right' : 'left';
@@ -715,7 +715,7 @@
     drawLoadoutReadout(f, left) {
       const ctx = this.ctx;
       const keys = GD.BINDINGS[f.player];
-      const k = (a) => GD.keyLabel(keys[a][0]);
+      const k = (a) => (f.cpu ? 'AUTO' : GD.keyLabel(keys[a][0]));
       const ammoOf = (w) => {
         if (w.ammo === Infinity) return '∞';
         let t = `${f.ammo[w.id]}/${w.ammo}`;

@@ -367,7 +367,7 @@
       for (const f of world.fighters) {
         const x = lerp(f.prevX, f.x, alpha), y = lerp(f.prevY, f.y, alpha);
         if (this.stage.gravity > 0) this.addShadow(x, y);
-        this.drawMech(f, x, y, f.facing, null, { flash: Math.min(1, f.hitFlash * 8) });
+        this.drawMech(f, x, y, f.facing, null, { flash: Math.min(1, f.hitFlash * 8), silhouette: f.silhouette });
         if (f.guarding) this.drawGuard(f, x, y);
       }
       this.drawProjectiles(world, alpha);
@@ -584,7 +584,7 @@
       const squash = f.landSquash || 0;
       if (squash > 0 && st !== 'down') rootM = mul(rootM, [1 + squash * 0.1, 0, 0, 0, 1 - squash * 0.12, 0, 0, 0, 1 + squash * 0.1]);
 
-      const o = { ghost: ghostColor, alpha: opts.alpha, flash: opts.flash };
+      const o = { ghost: ghostColor || (opts.silhouette ? '#1c2334' : null), alpha: opts.alpha, flash: opts.flash };
       for (const part of this.mechParts(f, st, vis.side)) this.addBox(part, rootM, rootT, o);
     }
 

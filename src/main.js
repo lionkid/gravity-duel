@@ -23,6 +23,11 @@
   };
 
   const app = {
+    mode: saved.mode === 'versus' ? 'versus' : 'solo',
+    cpuLevel: GD.AI_LEVELS && GD.AI_LEVELS[saved.cpuLevel] ? saved.cpuLevel : 'normal',
+    cpuSeed: 1 + Math.floor(Math.random() * 1e6),
+    cpuPick: null,      // single-player: the computer's frame and weapons
+    ai: null,
     view: renderers[saved.view] ? saved.view : (renderers['3d'] ? '3d' : '2d'),
     stageId: GD.STAGES[saved.stageId] ? saved.stageId : 'earth',
     picks: {
@@ -41,20 +46,58 @@
   GD.renderer = renderer;
 
   function save() {
-    try { localStorage.setItem(STORE_KEY, JSON.stringify({ view: app.view, stageId: app.stageId, picks: app.picks })); } catch (e) { /* storage blocked */ }
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify({ mode: app.mode, cpuLevel: app.cpuLevel, view: app.view, stageId: app.stageId, picks: app.picks }));
+    } catch (e) { /* storage blocked */ }
   }
 
-  const loadout = () => ({
-    1: { ranged: app.picks[1].ranged, melee: app.picks[1].melee },
-    2: { ranged: app.picks[2].ranged, melee: app.picks[2].melee },
-  });
+  const solo = () => app.mode === 'solo';
+  // The computer re-plans whenever the stage or the player's picks change; same seed, same answer.
+  function cpuPicks() {
+    app.cpuPick = GD.cpuChoose(app.cpuLevel, app.stageId, app.picks[1], app.cpuSeed);
+    return app.cpuPick;
+  }
+  const p2Pick = () => (solo() ? cpuPicks() : app.picks[2]);
+
+  const loadout = () => {
+    const b = p2Pick();
+    return { 1: { ranged: app.picks[1].ranged, melee: app.picks[1].melee }, 2: { ranged: b.ranged, melee: b.melee } };
+  };
 
   function startBattle() {
-    app.world = GD.createWorld(app.stageId, app.picks[1].mech, app.picks[2].mech, loadout());
+    const b = p2Pick();
+    app.world = GD.createWorld(app.stageId, app.picks[1].mech, b.mech, loadout());
+    const [f1, f2] = app.world.fighters;
+    if (solo()) {
+      app.ai = GD.createAI(app.cpuLevel, app.cpuSeed + 101);
+      f1.label = 'PLAYER';
+      f2.label = `CPU ${GD.AI_LEVELS[app.cpuLevel].label}`;
+      f2.cpu = true;
+    } else {
+      app.ai = null;
+    }
     app.koT = 0;
     input.clear();
     save();
     menus.go('battle');
+  }
+
+  function setMode(mode) {
+    app.mode = mode;
+    document.body.dataset.mode = mode;
+    save();
+  }
+  document.body.dataset.mode = app.mode;
+
+  // Single player may use either half of the keyboard (and either pad).
+  const KEYS = ['up', 'down', 'left', 'right', 'attack', 'sub', 'guard', 'switch', 'dash'];
+  function merge(a, b) {
+    const o = { pressed: {} };
+    for (const k of KEYS) {
+      o[k] = !!(a[k] || b[k]);
+      if (a.pressed[k] || b.pressed[k]) o.pressed[k] = true;
+    }
+    return o;
   }
 
   function toggleView() {
@@ -67,17 +110,24 @@
     save();
   }
 
-  const menus = new GD.Menus(document.getElementById('screens'), app, { startBattle, toggleView, picksChanged: save });
+  const menus = new GD.Menus(document.getElementById('screens'), app, {
+    startBattle, toggleView, setMode, cpuPicks, picksChanged: save,
+    newCpuSeed: () => { app.cpuSeed = 1 + Math.floor(Math.random() * 1e6); },
+  });
   GD.menus = menus;
 
   // Menu backdrop: the current picks standing in the arena, rebuilt whenever a pick changes.
   function showcaseWorld() {
     const scr = menus.screen === 'help' ? menus.helpFrom : menus.screen;
     const stageView = scr === 'stage';
+    const hidden = solo() && (scr === 'select' || scr === 'loadout');
     const pk = app.picks;
-    const key = [stageView ? 'stage' : 'menu', app.stageId, pk[1].mech, pk[2].mech, pk[1].ranged, pk[1].melee, pk[2].ranged, pk[2].melee].join('|');
+    const b = p2Pick();
+    const key = [stageView ? 'stage' : 'menu', hidden, app.stageId, pk[1].mech, b.mech, pk[1].ranged, pk[1].melee, b.ranged, b.melee].join('|');
     if (key !== app.showcaseKey) {
-      const w = GD.createWorld(app.stageId, pk[1].mech, pk[2].mech, loadout());
+      const w = GD.createWorld(app.stageId, pk[1].mech, b.mech, loadout());
+      // Until the stage is picked, the computer's frame is a silhouette.
+      if (hidden) w.fighters[1].silhouette = true;
       if (!stageView) {
         const y = w.stage.gravity > 0 ? GD.ARENA.groundY : 330;
         w.fighters.forEach((f, i) => { f.x = f.prevX = CX + (i ? 45 : -45); f.y = f.prevY = y; });
@@ -139,13 +189,19 @@
 
     // Menus read both keyboards whenever the players are not fighting.
     if (!app.focusLost && menus.screen !== 'battle') {
-      menus.input(1, input.sample(1).pressed);
-      menus.input(2, input.sample(2).pressed);
+      const p1 = input.sample(1).pressed, p2 = input.sample(2).pressed;
+      if (solo()) {
+        menus.input(1, Object.assign({}, p2, p1));
+      } else {
+        menus.input(1, p1);
+        menus.input(2, p2);
+      }
     }
     menus.update(dt);
 
     const scr = menus.screen;
-    const backdrop = scr === 'help' ? menus.helpFrom : scr;
+    let backdrop = scr === 'help' ? menus.helpFrom : scr;
+    if (backdrop === 'cpu') backdrop = 'title';           // difficulty screen shares the title backdrop
     const inBattle = menus.inBattle();
     const world = inBattle ? app.world : showcaseWorld();
     if (renderer.stage !== world.stage) renderer.setStage(world.stage);
@@ -159,7 +215,9 @@
       acc += dt;
       let steps = 0;
       while (acc >= GD.DT && steps < GD.MAX_STEPS_PER_FRAME) {
-        const inputs = live ? [input.sample(1), input.sample(2)] : [GD.IDLE_INPUT, GD.IDLE_INPUT];
+        let inputs = [GD.IDLE_INPUT, GD.IDLE_INPUT];
+        if (live && app.ai) inputs = [merge(input.sample(1), input.sample(2)), GD.aiInput(app.ai, world, 2, GD.DT)];
+        else if (live) inputs = [input.sample(1), input.sample(2)];
         GD.stepWorld(world, inputs, GD.DT);
         acc -= GD.DT;
         steps++;

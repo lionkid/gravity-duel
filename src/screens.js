@@ -16,7 +16,7 @@
     },
   };
   const MENUS = {
-    title: [{ id: 'start', label: '開始對戰' }, { id: 'view' }, { id: 'help', label: '操作說明' }],
+    title: [{ id: 'solo', label: '單人模式 · 對戰電腦' }, { id: 'versus', label: '雙人模式' }, { id: 'view' }, { id: 'help', label: '操作說明' }],
     pause: [{ id: 'resume', label: '繼續' }, { id: 'restart', label: '重新開始' }, { id: 'loadout', label: '換武裝' },
       { id: 'select', label: '換機體' }, { id: 'view' }, { id: 'help', label: '操作說明' }, { id: 'title', label: '回標題' }],
     ko: [{ id: 'restart', label: '再戰一場' }, { id: 'loadout', label: '換武裝' }, { id: 'select', label: '換機體' }, { id: 'title', label: '回標題' }],
@@ -35,12 +35,12 @@
       this.app = app;
       this.act = actions;
       this.screen = 'title';
-      this.cursor = { title: 0, pause: 0, ko: 0 };
+      this.cursor = { title: 0, pause: 0, ko: 0, cpu: 1 };
       this.ready = { 1: false, 2: false };
       this.lcur = { 1: { row: 0, col: 0 }, 2: { row: 0, col: 0 } };
       this.advanceT = 0;
       this.helpFrom = 'title';
-      for (const name of ['title', 'select', 'loadout', 'stage', 'pause', 'ko', 'help']) {
+      for (const name of ['title', 'cpu', 'select', 'loadout', 'stage', 'pause', 'ko', 'help']) {
         const el = document.createElement('div');
         el.className = `scr scr-${name}`;
         el.dataset.screen = name;
@@ -56,11 +56,18 @@
         (this.screen === 'help' && this.helpFrom !== 'title');
     }
 
+    solo() {
+      return this.app.mode === 'solo';
+    }
+
     go(screen) {
       if (screen === 'help' && this.screen !== 'help') this.helpFrom = this.screen;
+      if (screen === 'select' && this.screen !== 'select' && this.solo()) this.act.newCpuSeed();
+      if (screen === 'cpu') this.cursor.cpu = Math.max(0, GD.AI_ORDER.indexOf(this.app.cpuLevel));
       this.screen = screen;
       this.advanceT = 0;
-      if (screen === 'select' || screen === 'loadout') this.ready = { 1: false, 2: false };
+      // The computer side is always ready in single-player mode.
+      if (screen === 'select' || screen === 'loadout') this.ready = { 1: false, 2: this.solo() };
       if (screen === 'loadout') for (const p of [1, 2]) this.lcur[p] = this.posOf(this.app.picks[p].ranged);
       if (screen === 'pause' || screen === 'ko') this.cursor[screen] = 0;
       this.render();
@@ -82,7 +89,8 @@
 
     activate(id) {
       switch (id) {
-        case 'start': this.go('select'); break;
+        case 'solo': this.act.setMode('solo'); this.go('cpu'); break;
+        case 'versus': this.act.setMode('versus'); this.go('select'); break;
         case 'view': this.act.toggleView(); this.render(); break;
         case 'help': this.go('help'); break;
         case 'resume': this.go('battle'); break;
@@ -95,8 +103,15 @@
 
     setReady(p, v) {
       this.ready[p] = v;
+      if (this.solo()) this.ready[2] = true;
       this.advanceT = this.ready[1] && this.ready[2] ? 0.45 : 0;
       this.render();
+    }
+
+    pickLevel(i) {
+      this.cursor.cpu = i;
+      this.app.cpuLevel = GD.AI_ORDER[i];
+      this.act.picksChanged();
     }
 
     update(dt) {
@@ -124,6 +139,14 @@
         case 'help':
           if (pr.attack || pr.sub) this.go(this.helpFrom);
           break;
+        case 'cpu': {
+          const n = GD.AI_ORDER.length;
+          if (pr.up || pr.left) { this.pickLevel((this.cursor.cpu + n - 1) % n); this.render(); }
+          if (pr.down || pr.right) { this.pickLevel((this.cursor.cpu + 1) % n); this.render(); }
+          if (pr.attack) this.go('select');
+          else if (pr.sub) this.go('title');
+          break;
+        }
         case 'select': this.navSelect(p, pr); break;
         case 'loadout': this.navLoadout(p, pr); break;
         case 'stage': this.navStage(pr); break;
@@ -131,7 +154,7 @@
     }
 
     navSelect(p, pr) {
-      if (pr.sub) { if (this.ready[p]) this.setReady(p, false); else this.go('title'); return; }
+      if (pr.sub) { if (this.ready[p]) this.setReady(p, false); else this.go(this.solo() ? 'cpu' : 'title'); return; }
       if (pr.attack) { if (!this.ready[p]) this.setReady(p, true); return; }
       if (this.ready[p]) return;
       const n = GD.MECHS.length, rows = Math.ceil(n / 2);
@@ -185,10 +208,11 @@
       if (code === 'Enter') {
         if (MENUS[this.screen]) this.activate(MENUS[this.screen][this.cursor[this.screen]].id);
         else if (this.screen === 'help') this.go(this.helpFrom);
+        else if (this.screen === 'cpu') this.go('select');
         else if (this.screen === 'select' || this.screen === 'loadout') { this.ready = { 1: true, 2: false }; this.setReady(2, true); }
         else if (this.screen === 'stage') this.act.startBattle();
       } else if (code === 'Escape') {
-        const back = { battle: 'pause', pause: 'battle', help: this.helpFrom, select: 'title', loadout: 'select', stage: 'loadout' };
+        const back = { battle: 'pause', pause: 'battle', help: this.helpFrom, cpu: 'title', select: this.solo() ? 'cpu' : 'title', loadout: 'select', stage: 'loadout' };
         if (back[this.screen]) this.go(back[this.screen]);
       }
     }
@@ -222,6 +246,7 @@
         case 'ready': this.setReady(p, !this.ready[p]); break;
         case 'stage': this.app.stageId = id; this.act.picksChanged(); this.render(); break;
         case 'start': this.act.startBattle(); break;
+        case 'level': this.pickLevel(Number(id)); this.go('select'); break;
         case 'back': this.go(this.helpFrom); break;
       }
     }
@@ -249,10 +274,30 @@
         <p class="keys-hint"><span>任一玩家 ${kbd(1, 'up')}${kbd(1, 'down')} 或 ${kbd(2, 'up')}${kbd(2, 'down')} 選擇 · ${kbd(1, 'attack')} / ${kbd(2, 'attack')} / <kbd>Enter</kbd> 確認</span></p>`;
     }
 
+    // Right-hand panel in single-player mode: the opponent stays hidden until the stage is picked.
+    cpuSide() {
+      const L = GD.AI_LEVELS[this.app.cpuLevel];
+      const rules = {
+        easy: ['機體與武器隨機挑選', '反應慢，常常打歪'],
+        normal: ['依場景重力挑選有利的武器', '看距離切換遠程與近戰'],
+        hard: ['依場景挑武器，還會針對你的配置', '預判彈道、攔截火箭、近身防禦'],
+      }[L.id];
+      return `<section class="side panel p2 cpu is-ready">
+          <div class="who"><span>CPU · ${L.label}</span><span class="tag ready">自動配置</span></div>
+          <div class="pick-name">? ? ?<span class="role">選完場景後揭曉</span></div>
+          <ul class="cpu-rules">${rules.map((t) => `<li>${t}</li>`).join('')}</ul>
+          <p class="weak"><b>強度</b>${L.desc}</p>
+          <p class="cpu-note">要換強度，按返回鍵回到上一頁。</p>
+        </section>`;
+    }
+
     sideHint(slotted) {
       const nav = (p) => slotted
         ? `${kbd(p, 'up')}${kbd(p, 'down')} 選欄位 · ${kbd(p, 'left')}${kbd(p, 'right')} 換武器`
         : `${kbd(p, 'up')}${kbd(p, 'left')}${kbd(p, 'down')}${kbd(p, 'right')} 選擇`;
+      if (this.solo()) {
+        return `<p class="keys-hint"><span>${nav(1)} · ${kbd(1, 'attack')} 準備 · ${kbd(1, 'sub')} 返回</span><span>單人模式中，P2 的方向鍵與按鍵也可以操作</span></p>`;
+      }
       return `<p class="keys-hint">
           <span>P1 ${nav(1)} · ${kbd(1, 'attack')} 準備 · ${kbd(1, 'sub')} 返回</span>
           <span>P2 ${nav(2)} · ${kbd(2, 'attack')} 準備 · ${kbd(2, 'sub')} 返回</span>
@@ -282,7 +327,7 @@
           </section>`;
       };
       return `<div class="scr-head"><h2>SELECT FRAME · 選擇機體</h2><span class="step">STEP 1 / 3 · 每架機體五項能力總和都是 20</span></div>
-        <div class="cols">${side(1)}<div class="vs">VS</div>${side(2)}</div>
+        <div class="cols">${side(1)}<div class="vs">VS</div>${this.solo() ? this.cpuSide() : side(2)}</div>
         ${this.sideHint()}`;
     }
 
@@ -319,7 +364,7 @@
           </section>`;
       };
       return `<div class="scr-head"><h2>LOADOUT · 武裝配置</h2><span class="step">STEP 2 / 3 · 遠程與近戰各選一把，戰鬥中用切換鍵互換</span></div>
-        <div class="cols">${side(1)}<div class="vs">VS</div>${side(2)}</div>
+        <div class="cols">${side(1)}<div class="vs">VS</div>${this.solo() ? this.cpuSide() : side(2)}</div>
         ${this.sideHint(true)}`;
     }
 
@@ -332,16 +377,30 @@
             <ul>${info.notes.map((t) => `<li>${t}</li>`).join('')}</ul></button>`;
       };
       const mu = (p) => {
-        const pk = this.app.picks[p];
+        const cpu = p === 2 && this.solo();
+        const pk = cpu ? this.act.cpuPicks() : this.app.picks[p];
         const r = GD.weaponById(pk.ranged), me = GD.weaponById(pk.melee);
         const row = (w) => `<div><span class="pill ${w[sid]}">${AFF[w[sid]]}</span>${w.name} · ${w[sid + 'Note']}</div>`;
-        return `<div class="mu panel p${p}"><div class="who"><span>PLAYER ${p} · ${mechOf(pk.mech).name}</span></div>${row(r)}${row(me)}</div>`;
+        const who = cpu ? `CPU ${GD.AI_LEVELS[this.app.cpuLevel].label} · ${mechOf(pk.mech).name}` : `PLAYER ${p} · ${mechOf(pk.mech).name}`;
+        const why = cpu && pk.reasons ? `<div class="why">${pk.reasons.map((t) => `<span>${t}</span>`).join('')}</div>` : '';
+        return `<div class="mu panel p${p}"><div class="who"><span>${who}</span>${cpu ? '<span class="tag ready">自動配置</span>' : ''}</div>${row(r)}${row(me)}${why}</div>`;
       };
       return `<div class="scr-head"><h2>SELECT STAGE · 選擇場景</h2><span class="step">STEP 3 / 3 · 場景重力會改變所有實體彈藥的軌跡</span></div>
         <div class="stage-cards">${card('earth')}${card('space')}</div>
         <div class="matchup">${mu(1)}${mu(2)}</div>
         <p class="keys-hint"><span>任一玩家 ${kbd(1, 'left')}${kbd(1, 'right')} 或 ${kbd(2, 'left')}${kbd(2, 'right')} 切換場景 · ${kbd(1, 'sub')} / ${kbd(2, 'sub')} 返回</span>
           <button class="go" data-act="start">開始對戰 <kbd>F</kbd> <kbd>Num 1</kbd> <kbd>Enter</kbd></button></p>`;
+    }
+
+    html_cpu() {
+      const items = GD.AI_ORDER.map((id, i) => {
+        const L = GD.AI_LEVELS[id];
+        return `<button class="lvl panel ${i === this.cursor.cpu ? 'on' : ''}" data-act="level" data-id="${i}">
+            <span class="lvl-name">${L.label}<small>${id.toUpperCase()}</small></span><span class="lvl-desc">${L.desc}</span></button>`;
+      }).join('');
+      return `<div class="scr-head"><h2>VS CPU · 電腦強度</h2><span class="step">單人模式 · 電腦會在你選好場景後自動配置機體與武器</span></div>
+        <div class="lvls">${items}</div>
+        <p class="keys-hint"><span>${kbd(1, 'up')}${kbd(1, 'down')} 或 ${kbd(2, 'up')}${kbd(2, 'down')} 選擇 · ${kbd(1, 'attack')} / <kbd>Enter</kbd> 確認 · ${kbd(1, 'sub')} 返回</span></p>`;
     }
 
     html_pause() {
@@ -370,6 +429,7 @@
             <li>按住上或下再攻擊，可以抬高或壓低射角。地球上抬高射角會順便跳起來。</li>
             <li>切換武器後要等 ${GD.COMBAT.switchCooldown} 秒才能再切換，剛換上的武器有 ${GD.COMBAT.switchLag} 秒出手準備。</li>
             <li>火神砲在任何模式都能用，可以擊落火箭砲與榴彈。</li>
+            <li>單人模式中，鍵盤左右兩側的按鍵都能操作你的機體。</li>
             <li><kbd>Esc</kbd> 暫停 · <kbd>\`</kbd> 除錯資訊</li>
           </ul>
           <button class="readybtn" data-act="back">返回 <kbd>Enter</kbd></button>
