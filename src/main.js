@@ -29,11 +29,14 @@
     cpuPick: null,      // single-player: the computer's frame and weapons
     ai: null,
     view: renderers[saved.view] ? saved.view : (renderers['3d'] ? '3d' : '2d'),
+    sound: saved.sound !== false,
     stageId: GD.STAGES[saved.stageId] ? saved.stageId : 'earth',
     picks: {
       1: restorePick(1, { mech: 'ax01', ranged: 'beam', melee: 'saber' }),
       2: restorePick(2, { mech: 'zr06', ranged: 'bazooka', melee: 'axe' }),
     },
+    net: GD.Net ? new GD.Net() : null,
+    lanNote: '',
     world: null,        // the running battle
     showcase: null,     // menu backdrop world
     showcaseKey: '',
@@ -47,7 +50,7 @@
 
   function save() {
     try {
-      localStorage.setItem(STORE_KEY, JSON.stringify({ mode: app.mode, cpuLevel: app.cpuLevel, view: app.view, stageId: app.stageId, picks: app.picks }));
+      localStorage.setItem(STORE_KEY, JSON.stringify({ mode: app.mode, cpuLevel: app.cpuLevel, view: app.view, sound: app.sound, stageId: app.stageId, picks: app.picks }));
     } catch (e) { /* storage blocked */ }
   }
 
@@ -64,11 +67,34 @@
     return { 1: { ranged: app.picks[1].ranged, melee: app.picks[1].melee }, 2: { ranged: b.ranged, melee: b.melee } };
   };
 
+  const lan = () => app.mode === 'lan';
+  const me = () => (lan() ? app.net.player || 1 : 1);
+  const lanGuest = () => lan() && app.net.player === 2;
+  const remote = GD.createRemoteInput ? GD.createRemoteInput() : null;
+  let lanEvents = [];
+  let snapAt = 0, snapGap = 1 / 60;
+
+  function labelLan(world) {
+    for (const f of world.fighters) {
+      const mine = f.player === me();
+      f.label = mine ? `YOU P${f.player}` : `RIVAL P${f.player}`;
+      f.keySet = mine ? 1 : 0;      // HUD key hints: either keyboard half works locally; the rival plays elsewhere
+      f.remote = !mine;
+    }
+  }
+
   function startBattle() {
+    if (lanGuest()) return;                       // only the host starts LAN matches
     const b = p2Pick();
-    app.world = GD.createWorld(app.stageId, app.picks[1].mech, b.mech, loadout());
+    const seed = Math.floor(Math.random() * 1e9);
+    app.world = GD.createWorld(app.stageId, app.picks[1].mech, b.mech, loadout(), seed);
     const [f1, f2] = app.world.fighters;
-    if (solo()) {
+    if (lan()) {
+      app.ai = null;
+      labelLan(app.world);
+      lanEvents = [];
+      app.net.send({ t: 'start', stageId: app.stageId, picks: app.picks, seed });
+    } else if (solo()) {
       app.ai = GD.createAI(app.cpuLevel, app.cpuSeed + 101);
       f1.label = 'PLAYER';
       f2.label = `CPU ${GD.AI_LEVELS[app.cpuLevel].label}`;
@@ -80,12 +106,104 @@
     input.clear();
     save();
     menus.go('battle');
+    sfx('start');
+  }
+
+  // Guest side of a LAN match: build the same world, then follow the host's snapshots.
+  function startGuest(m) {
+    app.stageId = m.stageId;
+    app.picks = m.picks;
+    const lo = { 1: { ranged: m.picks[1].ranged, melee: m.picks[1].melee }, 2: { ranged: m.picks[2].ranged, melee: m.picks[2].melee } };
+    app.world = GD.createWorld(m.stageId, m.picks[1].mech, m.picks[2].mech, lo, m.seed);
+    labelLan(app.world);
+    app.ai = null;
+    app.koT = 0;
+    snapAt = performance.now();
+    input.clear();
+    menus.go('battle');
+    sfx('start');
   }
 
   function setMode(mode) {
     app.mode = mode;
     document.body.dataset.mode = mode;
+    if (mode !== 'lan' && app.net) app.net.close();
     save();
+  }
+
+  // ---- LAN messages ----
+  function sendPick() {
+    if (!lan() || !app.net.player) return;
+    app.net.send({ t: 'pick', screen: menus.screen, pick: app.picks[me()], ready: !!menus.ready[me()] });
+    if (!lanGuest() && menus.screen === 'stage') app.net.send({ t: 'stage', id: app.stageId });
+  }
+  function picksChanged() {
+    save();
+    sendPick();
+  }
+  function onNet(m) {
+    if (!lan()) return;
+    const other = 3 - me();
+    switch (m.t) {
+      case 'hello':
+      case 'status':
+        app.lanNote = '';
+        if (menus.screen === 'lan') menus.render();
+        break;
+      case 'peer':
+        if (m.on) {
+          app.lanNote = '';
+          // The host takes both browsers to frame select as soon as the guest arrives.
+          if (!lanGuest()) { menus.goShared('select'); sendPick(); } else menus.render();
+        } else if (menus.screen !== 'title') {
+          app.lanNote = '對手已離線。等待新的對手連線…';
+          menus.go('lan');
+        }
+        break;
+      case 'closed':
+        if (menus.screen !== 'title') { app.lanNote = '與伺服器的連線中斷。'; menus.go('lan'); }
+        break;
+      case 'go':
+        menus.go(m.screen);
+        sendPick();
+        break;
+      case 'pick':
+        app.picks[other] = m.pick;
+        app.showcaseKey = '';
+        if (m.screen === menus.screen && (m.screen === 'select' || m.screen === 'loadout')) menus.setReady(other, m.ready, true);
+        else menus.render();
+        break;
+      case 'stage':
+        if (lanGuest() && GD.STAGES[m.id]) { app.stageId = m.id; menus.render(); }
+        break;
+      case 'start':
+        if (lanGuest()) startGuest(m);
+        break;
+      case 'restart':
+        if (!lanGuest()) startBattle();
+        break;
+      case 'in':
+        if (remote) GD.remoteReceive(remote, m);
+        break;
+      case 'snap':
+        if (lanGuest() && app.world) {
+          GD.lanApply(app.world, m);
+          const now = performance.now();
+          snapGap += (Math.min(0.1, (now - snapAt) / 1000) - snapGap) * 0.2;
+          snapAt = now;
+        }
+        break;
+    }
+  }
+  if (app.net) app.net.onMessage = onNet;
+  function lanConnect() {
+    app.lanNote = '';
+    if (!app.net.ws) app.net.connect();
+    menus.render();
+  }
+  function lanLeave() {
+    if (app.net) app.net.close();
+    app.lanNote = '';
   }
   document.body.dataset.mode = app.mode;
 
@@ -110,8 +228,25 @@
     save();
   }
 
+  // ---- sound: starts on the first key press or click (browser autoplay rule) ----
+  const sound = GD.Sound ? new GD.Sound() : null;
+  if (sound) {
+    sound.setEnabled(app.sound);
+    const unlock = () => sound.unlock();
+    window.addEventListener('pointerdown', unlock, true);
+    window.addEventListener('keydown', unlock, true);
+  }
+  GD.sound = sound;
+  function toggleSound() {
+    app.sound = !app.sound;
+    if (sound) sound.setEnabled(app.sound);
+    save();
+  }
+  const sfx = (name) => { if (sound) sound.play(name); };
+
   const menus = new GD.Menus(document.getElementById('screens'), app, {
-    startBattle, toggleView, setMode, cpuPicks, picksChanged: save,
+    startBattle, toggleView, setMode, cpuPicks, toggleSound, sfx, picksChanged,
+    share: (m) => { if (app.net) app.net.send(m); }, lanConnect, lanLeave,
     newCpuSeed: () => { app.cpuSeed = 1 + Math.floor(Math.random() * 1e6); },
   });
   GD.menus = menus;
@@ -156,6 +291,7 @@
   input.onGlobal = (code) => {
     if (app.focusLost) return;
     if (code === 'Backquote') { app.debug = !app.debug; return; }
+    if (code === 'KeyM') { toggleSound(); if (menus.screen !== 'battle') menus.render(); return; }
     menus.global(code);
   };
 
@@ -190,8 +326,9 @@
     // Menus read both keyboards whenever the players are not fighting.
     if (!app.focusLost && menus.screen !== 'battle') {
       const p1 = input.sample(1).pressed, p2 = input.sample(2).pressed;
-      if (solo()) {
-        menus.input(1, Object.assign({}, p2, p1));
+      if (solo() || lan()) {
+        // One local player: both halves of the keyboard drive that player's side.
+        menus.input(me(), Object.assign({}, p2, p1));
       } else {
         menus.input(1, p1);
         menus.input(2, p2);
@@ -201,7 +338,7 @@
 
     const scr = menus.screen;
     let backdrop = scr === 'help' ? menus.helpFrom : scr;
-    if (backdrop === 'cpu') backdrop = 'title';           // difficulty screen shares the title backdrop
+    if (backdrop === 'cpu' || backdrop === 'lan') backdrop = 'title';   // these screens share the title backdrop
     const inBattle = menus.inBattle();
     const world = inBattle ? app.world : showcaseWorld();
     if (renderer.stage !== world.stage) renderer.setStage(world.stage);
@@ -210,20 +347,33 @@
     }
 
     const live = scr === 'battle';
-    const halted = app.focusLost || scr === 'pause' || (scr === 'help' && inBattle);
-    if (!halted) {
+    // A LAN match keeps running when one window loses focus; only the pause menu stops it.
+    const halted = (app.focusLost && !(lan() && inBattle)) || scr === 'pause' || (scr === 'help' && inBattle);
+    const guestView = lanGuest() && inBattle;
+    if (guestView) {
+      // LAN guest: send our keys to the host and draw the host's snapshots.
+      if (live) app.net.send(Object.assign({ t: 'in' }, GD.encodeInput(merge(input.sample(1), input.sample(2)))));
+    } else if (!halted) {
       acc += dt;
       let steps = 0;
       while (acc >= GD.DT && steps < GD.MAX_STEPS_PER_FRAME) {
         let inputs = [GD.IDLE_INPUT, GD.IDLE_INPUT];
         if (live && app.ai) inputs = [merge(input.sample(1), input.sample(2)), GD.aiInput(app.ai, world, 2, GD.DT)];
+        else if (live && lan()) inputs = [merge(input.sample(1), input.sample(2)), GD.remoteStep(remote)];
         else if (live) inputs = [input.sample(1), input.sample(2)];
         GD.stepWorld(world, inputs, GD.DT);
         acc -= GD.DT;
         steps++;
       }
       if (steps === GD.MAX_STEPS_PER_FRAME) acc = 0;
+      if (lan() && inBattle) {
+        for (const e of world.events) lanEvents.push(e);
+        if (steps > 0) { app.net.send(GD.lanSnapshot(world, lanEvents)); lanEvents = []; }
+      }
+    }
+    if (guestView || !halted) {
       renderer.consume(world.events);
+      if (sound && inBattle) sound.consume(world.events);
       world.events.length = 0;
     }
     if (live && app.world.winner) {
@@ -231,13 +381,14 @@
       if (app.koT > 1.4) menus.go('ko');
     }
 
-    const alpha = halted ? 1 : acc / GD.DT;
+    const alpha = guestView ? Math.min(1, (now - snapAt) / 1000 / Math.max(0.008, snapGap)) : halted ? 1 : acc / GD.DT;
     const opts = { debug: app.debug && inBattle, paused: halted && inBattle };
     if (backdrop === 'title' || backdrop === 'select' || backdrop === 'loadout') {
       opts.showcase = true;
       opts.offsetX = backdrop === 'title' ? 210 : 0;
     }
     if (backdrop === 'stage') opts.noHud = true;
+    if (sound) sound.updateLoops(world, inBattle && !halted);
     renderer.update(halted ? 0 : dt, world, alpha);
     renderer.draw(world, alpha, opts);
 

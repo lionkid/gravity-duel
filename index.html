@@ -111,14 +111,15 @@
   .pill.good { color: var(--good); } .pill.even { color: var(--accent-2); } .pill.bad { color: var(--bad); }
 
   /* stage */
-  .stage-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 1em; }
+  .stage-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.8em; }
   .stage-card { text-align: left; padding: 0.8em 1em; display: grid; gap: 0.3em; cursor: pointer; }
   .stage-card:hover { border-color: var(--accent-2); }
   .stage-card.on { border-color: var(--accent); box-shadow: 0 0 0 0.14em var(--accent); }
   .stage-card .g { font-family: var(--mono); font-size: 0.75em; color: var(--accent-2); }
   .stage-card h3 { font-size: 1.3em; }
   .stage-card ul { margin: 0; padding-left: 1.2em; color: var(--muted); font-size: 0.82em; }
-  .stage-card.earth h3 { color: #ffc28a; } .stage-card.space h3 { color: #c9b6ff; }
+  .stage-card.earth h3 { color: #ffc28a; } .stage-card.space h3 { color: #c9b6ff; } .stage-card.moon h3 { color: #d7dde8; }
+  .mu em { display: block; font-style: normal; color: var(--muted); font-size: 0.92em; }
   .matchup { display: grid; grid-template-columns: 1fr 1fr; gap: 1em; }
   .mu { padding: 0.55em 0.8em; display: grid; gap: 0.25em; font-size: 0.8em; }
   .mu > div:not(.who) { display: flex; gap: 0.5em; align-items: baseline; }
@@ -139,6 +140,18 @@
   .cpu-rules { margin: 0; padding-left: 1.2em; font-size: 0.82em; display: grid; gap: 0.2em; }
   .cpu-note { margin: 0; margin-top: auto; font-size: 0.75em; color: var(--muted); }
   .why { display: flex; flex-direction: column; gap: 0.1em; color: var(--accent-2); font-size: 0.92em; border-top: 1px dashed var(--line); padding-top: 0.25em; }
+
+  /* LAN lobby */
+  .scr-lan { padding-left: 3em; background: linear-gradient(90deg, rgba(5, 7, 13, 0.92), rgba(5, 7, 13, 0.6) 55%, transparent 80%); }
+  .modal.lan { max-width: 36em; margin-top: 0.5em; font-size: 0.9em; }
+  .modal.lan p, .modal.lan ol { margin: 0; }
+  .modal.lan ol { padding-left: 1.3em; display: grid; gap: 0.3em; }
+  .lan-big { font-family: var(--display); font-size: 1.25em; color: var(--text); }
+  .lan-url { font-family: var(--mono); font-size: 1.4em; color: var(--accent); user-select: all; }
+  .lan-note { color: var(--bad) !important; }
+  .lan-actions { display: flex; gap: 0.6em; flex-wrap: wrap; }
+  .lan-actions .readybtn { margin-top: 0; padding-inline: 1em; }
+  .screens code, .note code { font-family: var(--mono); background: #1d2740; border: 1px solid var(--line); border-radius: 0.2em; padding: 0 0.35em; }
 
   /* pause, KO and help */
   .scr-pause, .scr-help { align-items: center; justify-content: center; background: rgba(5, 7, 13, 0.35); }
@@ -183,8 +196,11 @@
   .pad-note { margin: 0; font-size: 12px; color: var(--muted); }
   .cpu-pad { display: none; place-content: center; text-align: center; gap: 4px; }
   .cpu-pad b { font-family: var(--display); font-weight: 400; color: var(--p2); font-size: 18px; }
-  body[data-mode="solo"] #pad2 { display: none; }
+  body[data-mode="solo"] #pad2, body[data-mode="lan"] #pad2 { display: none; }
   body[data-mode="solo"] .cpu-pad { display: grid; }
+  .lan-pad { display: none; place-content: center; text-align: center; gap: 4px; }
+  .lan-pad b { font-family: var(--display); font-weight: 400; color: var(--p2); font-size: 18px; }
+  body[data-mode="lan"] .lan-pad { display: grid; }
   @media (max-width: 760px) { .pads { grid-template-columns: 1fr; } .sys { flex-direction: row; justify-content: center; } }
 
   /* ---- below the frame ---- */
@@ -208,7 +224,7 @@
 <div class="wrap">
   <header>
     <div>
-      <div class="eyebrow">Build M3 · 單人與雙人模式</div>
+      <div class="eyebrow">單人 · 雙人 · 區域網路對戰</div>
       <h1>GRAVITY DUEL</h1>
     </div>
     <p class="muted">同一台電腦的雙人對戰，可以用鍵盤或畫面下方的按鈕操作。Esc 暫停。</p>
@@ -228,6 +244,7 @@
     </div>
     <div class="pad p2" id="pad2"></div>
     <div class="pad p2 cpu-pad"><b>CPU</b><span class="muted">單人模式中由電腦操作。<br>P1 可以用鍵盤任一側或左邊的按鈕。</span></div>
+    <div class="pad p2 lan-pad"><b>LAN</b><span class="muted">對手在另一台電腦上。<br>你可以用鍵盤任一側或左邊的按鈕。</span></div>
   </div>
   <p class="pad-note">按鈕和鍵盤可以混用。觸控螢幕支援多指同時按，兩人可以在平板上各用一組；滑鼠一次只能按住一個鍵。選單中方向鍵選擇、攻擊確認、火神砲返回。</p>
 
@@ -267,11 +284,13 @@
       </ul>
     </div>
     <div class="note">
-      <h2>傷害調整</h2>
+      <h2>場景與平衡</h2>
       <ul>
-        <li><b>遠程降低</b>：光束 90→70、火箭砲直擊 130、機槍 22→15、榴彈直擊 90。</li>
-        <li><b>近戰提高</b>：光束軍刀 220、熱能戰斧 300（破防）、光束長槍 170（距離 120）。</li>
-        <li><b>爆風加大</b>：火箭砲 70→120、榴彈 90→150。</li>
+        <li><b>三個場景</b>：地球 1.0 G、月面基地 0.17 G、太空 0 G。</li>
+        <li><b>空氣</b>：地球上光束越遠越弱；真空中爆風縮小、能量回復變慢。</li>
+        <li><b>後座力</b>：低重力與零重力中開火會把自己往後推。</li>
+        <li><b>每把武器在每個場景都有弱點</b>，武器卡與選場景畫面都會寫出來。</li>
+        <li><b>區域網路對戰</b>：在一台電腦執行 <code>node server/lan-server.js</code>，兩台都打開它顯示的網址。</li>
       </ul>
     </div>
   </div>
@@ -284,6 +303,8 @@
 <script src="src/render.js"></script>
 <script src="src/render3d.js"></script>
 <script src="src/ai.js"></script>
+<script src="src/audio.js"></script>
+<script src="src/net.js"></script>
 <script src="src/screens.js"></script>
 <script src="src/touch.js"></script>
 <script src="src/main.js"></script>

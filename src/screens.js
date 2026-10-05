@@ -10,15 +10,20 @@
       title: 'EARTH · 地球', g: 'g = 9.8 m/s² · 1.0 G',
       notes: ['實體彈藥會下墜，火箭砲要跳起來往上打', '按住上鍵噴射滯空，燃料用完會過熱', '三座平台可以掩護，按住下鍵往下穿越'],
     },
+    moon: {
+      title: 'MOON · 月面基地', g: 'g = 1.6 m/s² · 0.17 G',
+      notes: ['低重力：跳得又高又久，彈藥只會微微下墜', '真空：爆風變小、能量回復變慢、光束不衰減', '開火有後座力，空中連射會被推開'],
+    },
     space: {
       title: 'SPACE · 太空', g: 'g = 0 · 0 G',
-      notes: ['所有彈藥直線飛行，火箭砲變成遠距利器', '方向鍵就是噴射方向，放開後保持慣性', '防禦鍵同時是逆噴射煞車'],
+      notes: ['所有彈藥直線飛行，開火後座力會推動機體', '方向鍵就是噴射方向，放開後保持慣性', '真空爆風變小；防禦鍵兼逆噴射煞車'],
     },
   };
   const MENUS = {
-    title: [{ id: 'solo', label: '單人模式 · 對戰電腦' }, { id: 'versus', label: '雙人模式' }, { id: 'view' }, { id: 'help', label: '操作說明' }],
+    title: [{ id: 'solo', label: '單人模式 · 對戰電腦' }, { id: 'versus', label: '雙人模式 · 同一台電腦' }, { id: 'lan', label: '區域網路對戰' },
+      { id: 'view' }, { id: 'sound' }, { id: 'help', label: '操作說明' }],
     pause: [{ id: 'resume', label: '繼續' }, { id: 'restart', label: '重新開始' }, { id: 'loadout', label: '換武裝' },
-      { id: 'select', label: '換機體' }, { id: 'view' }, { id: 'help', label: '操作說明' }, { id: 'title', label: '回標題' }],
+      { id: 'select', label: '換機體' }, { id: 'view' }, { id: 'sound' }, { id: 'help', label: '操作說明' }, { id: 'title', label: '回標題' }],
     ko: [{ id: 'restart', label: '再戰一場' }, { id: 'loadout', label: '換武裝' }, { id: 'select', label: '換機體' }, { id: 'title', label: '回標題' }],
   };
   // Loadout slots: up/down picks the slot, left/right cycles the weapon in it.
@@ -40,7 +45,7 @@
       this.lcur = { 1: { row: 0, col: 0 }, 2: { row: 0, col: 0 } };
       this.advanceT = 0;
       this.helpFrom = 'title';
-      for (const name of ['title', 'cpu', 'select', 'loadout', 'stage', 'pause', 'ko', 'help']) {
+      for (const name of ['title', 'cpu', 'lan', 'select', 'loadout', 'stage', 'pause', 'ko', 'help']) {
         const el = document.createElement('div');
         el.className = `scr scr-${name}`;
         el.dataset.screen = name;
@@ -58,6 +63,17 @@
 
     solo() {
       return this.app.mode === 'solo';
+    }
+
+    // LAN helpers: which side this browser plays, and whether it is the guest (player 2).
+    lan() { return this.app.mode === 'lan'; }
+    me() { return this.lan() ? this.app.net.player || 1 : 0; }
+    guest() { return this.lan() && this.app.net.player === 2; }
+
+    // Screen changes both LAN players must make together are sent to the other browser too.
+    goShared(screen) {
+      if (this.lan()) this.act.share({ t: 'go', screen });
+      this.go(screen);
     }
 
     go(screen) {
@@ -91,20 +107,31 @@
       switch (id) {
         case 'solo': this.act.setMode('solo'); this.go('cpu'); break;
         case 'versus': this.act.setMode('versus'); this.go('select'); break;
+        case 'lan': this.act.setMode('lan'); this.go('lan'); this.act.lanConnect(); break;
         case 'view': this.act.toggleView(); this.render(); break;
+        case 'sound': this.act.toggleSound(); this.render(); break;
         case 'help': this.go('help'); break;
-        case 'resume': this.go('battle'); break;
-        case 'restart': this.act.startBattle(); break;
-        case 'loadout': this.go('loadout'); break;
-        case 'select': this.go('select'); break;
-        case 'title': this.go('title'); break;
+        case 'resume': this.goShared('battle'); break;
+        case 'restart':
+          // On LAN only the host starts matches; the guest asks for one.
+          if (this.guest()) this.act.share({ t: 'restart' });
+          else this.act.startBattle();
+          break;
+        case 'loadout': this.goShared('loadout'); break;
+        case 'select': this.goShared('select'); break;
+        case 'title':
+          if (this.lan()) this.act.lanLeave();
+          this.go('title');
+          break;
       }
     }
 
-    setReady(p, v) {
+    setReady(p, v, remote) {
       this.ready[p] = v;
       if (this.solo()) this.ready[2] = true;
-      this.advanceT = this.ready[1] && this.ready[2] ? 0.45 : 0;
+      // On LAN the host moves both browsers forward; the guest waits for the host's go.
+      this.advanceT = this.ready[1] && this.ready[2] && !this.guest() ? 0.45 : 0;
+      if (!remote && this.lan()) this.act.picksChanged();
       this.render();
     }
 
@@ -117,7 +144,7 @@
     update(dt) {
       if (this.advanceT > 0) {
         this.advanceT -= dt;
-        if (this.advanceT <= 0) this.go(this.screen === 'select' ? 'loadout' : 'stage');
+        if (this.advanceT <= 0) this.goShared(this.screen === 'select' ? 'loadout' : 'stage');
       }
     }
 
@@ -147,14 +174,22 @@
           else if (pr.sub) this.go('title');
           break;
         }
-        case 'select': this.navSelect(p, pr); break;
-        case 'loadout': this.navLoadout(p, pr); break;
-        case 'stage': this.navStage(pr); break;
+        case 'lan':
+          if (pr.attack) this.act.lanConnect();
+          else if (pr.sub) this.activate('title');
+          break;
+        case 'select': if (!this.lan() || p === this.me()) this.navSelect(p, pr); break;
+        case 'loadout': if (!this.lan() || p === this.me()) this.navLoadout(p, pr); break;
+        case 'stage': if (!this.guest()) this.navStage(pr); break;
       }
     }
 
     navSelect(p, pr) {
-      if (pr.sub) { if (this.ready[p]) this.setReady(p, false); else this.go(this.solo() ? 'cpu' : 'title'); return; }
+      if (pr.sub) {
+        if (this.ready[p]) this.setReady(p, false);
+        else if (!this.lan()) this.go(this.solo() ? 'cpu' : 'title');
+        return;
+      }
       if (pr.attack) { if (!this.ready[p]) this.setReady(p, true); return; }
       if (this.ready[p]) return;
       const n = GD.MECHS.length, rows = Math.ceil(n / 2);
@@ -172,7 +207,7 @@
     }
 
     navLoadout(p, pr) {
-      if (pr.sub) { if (this.ready[p]) this.setReady(p, false); else this.go('select'); return; }
+      if (pr.sub) { if (this.ready[p]) this.setReady(p, false); else this.goShared('select'); return; }
       if (pr.attack) { if (!this.ready[p]) this.setReady(p, true); return; }
       if (this.ready[p]) return;
       const slots = SLOTS();
@@ -195,12 +230,14 @@
 
     navStage(pr) {
       if (pr.left || pr.right) {
-        this.app.stageId = this.app.stageId === 'earth' ? 'space' : 'earth';
+        const order = GD.STAGE_ORDER, n = order.length;
+        const i = Math.max(0, order.indexOf(this.app.stageId));
+        this.app.stageId = order[(i + (pr.right ? 1 : n - 1)) % n];
         this.act.picksChanged();
         this.render();
       }
       if (pr.attack) this.act.startBattle();
-      else if (pr.sub) this.go('loadout');
+      else if (pr.sub) this.goShared('loadout');
     }
 
     // Enter and Escape work for either player.
@@ -209,9 +246,18 @@
         if (MENUS[this.screen]) this.activate(MENUS[this.screen][this.cursor[this.screen]].id);
         else if (this.screen === 'help') this.go(this.helpFrom);
         else if (this.screen === 'cpu') this.go('select');
+        else if (this.screen === 'lan') this.act.lanConnect();
+        else if ((this.screen === 'select' || this.screen === 'loadout') && this.lan()) this.setReady(this.me(), true);
         else if (this.screen === 'select' || this.screen === 'loadout') { this.ready = { 1: true, 2: false }; this.setReady(2, true); }
-        else if (this.screen === 'stage') this.act.startBattle();
+        else if (this.screen === 'stage' && !this.guest()) this.act.startBattle();
       } else if (code === 'Escape') {
+        if (this.lan()) {
+          const back = { battle: 'pause', pause: 'battle', loadout: 'select', stage: 'loadout' };
+          if (this.screen === 'help') this.go(this.helpFrom);
+          else if (this.screen === 'lan' || this.screen === 'select') this.activate('title');
+          else if (back[this.screen] && !(this.screen === 'stage' && this.guest())) this.goShared(back[this.screen]);
+          return;
+        }
         const back = { battle: 'pause', pause: 'battle', help: this.helpFrom, cpu: 'title', select: this.solo() ? 'cpu' : 'title', loadout: 'select', stage: 'loadout' };
         if (back[this.screen]) this.go(back[this.screen]);
       }
@@ -227,15 +273,16 @@
       switch (el.dataset.act) {
         case 'menu': {
           const list = MENUS[this.screen];
-          this.cursor[this.screen] = Math.max(0, list.findIndex((it) => it.id === id));
+          if (list) this.cursor[this.screen] = Math.max(0, list.findIndex((it) => it.id === id));
           this.activate(id);
           break;
         }
         case 'mech':
+          if (this.lan() && p !== this.me()) break;
           if (!this.ready[p]) { this.app.picks[p].mech = id; this.act.picksChanged(); this.render(); }
           break;
         case 'weapon': {
-          if (this.ready[p]) break;
+          if (this.ready[p] || (this.lan() && p !== this.me())) break;
           const w = GD.weaponById(id);
           this.app.picks[p][w.kind === 'melee' ? 'melee' : 'ranged'] = id;
           this.lcur[p] = this.posOf(id);
@@ -243,9 +290,10 @@
           this.render();
           break;
         }
-        case 'ready': this.setReady(p, !this.ready[p]); break;
-        case 'stage': this.app.stageId = id; this.act.picksChanged(); this.render(); break;
-        case 'start': this.act.startBattle(); break;
+        case 'ready': if (!this.lan() || p === this.me()) this.setReady(p, !this.ready[p]); break;
+        case 'stage': if (!this.guest()) { this.app.stageId = id; this.act.picksChanged(); this.render(); } break;
+        case 'start': if (!this.guest()) this.act.startBattle(); break;
+        case 'lanretry': this.act.lanConnect(); break;
         case 'level': this.pickLevel(Number(id)); this.go('select'); break;
         case 'back': this.go(this.helpFrom); break;
       }
@@ -253,15 +301,19 @@
 
     // ---- rendering ----
     render() {
+      // Menu blips: a new screen confirms, a change on the same screen is a cursor move.
+      if (this.act.sfx && this.screen !== 'battle') this.act.sfx(this.lastScreen !== this.screen ? 'menuOk' : 'menuMove');
+      this.lastScreen = this.screen;
       for (const el of this.root.children) el.hidden = el.dataset.screen !== this.screen;
       const el = this.root.querySelector(`[data-screen="${this.screen}"]`);
       if (el) el.innerHTML = this['html_' + this.screen]();
     }
 
     menuHtml(name) {
-      const viewLabel = `視角：${this.app.view === '3d' ? '2.5D' : '2D'}`;
+      const label = (it) => (it.id === 'view' ? `視角：${this.app.view === '3d' ? '2.5D' : '2D'}`
+        : it.id === 'sound' ? `音效：${this.app.sound ? '開' : '關'}` : it.label);
       return `<div class="menu menu-${name}">${MENUS[name].map((it, i) =>
-        `<button data-act="menu" data-id="${it.id}" class="${i === this.cursor[name] ? 'on' : ''}">${it.id === 'view' ? viewLabel : it.label}</button>`).join('')}</div>`;
+        `<button data-act="menu" data-id="${it.id}" class="${i === this.cursor[name] ? 'on' : ''}">${label(it)}</button>`).join('')}</div>`;
     }
 
     html_title() {
@@ -291,12 +343,20 @@
         </section>`;
     }
 
+    whoTag(p) {
+      if (!this.lan()) return '';
+      return p === this.me() ? ' · 你' : ' · 對手';
+    }
+
     sideHint(slotted) {
       const nav = (p) => slotted
         ? `${kbd(p, 'up')}${kbd(p, 'down')} 選欄位 · ${kbd(p, 'left')}${kbd(p, 'right')} 換武器`
         : `${kbd(p, 'up')}${kbd(p, 'left')}${kbd(p, 'down')}${kbd(p, 'right')} 選擇`;
       if (this.solo()) {
         return `<p class="keys-hint"><span>${nav(1)} · ${kbd(1, 'attack')} 準備 · ${kbd(1, 'sub')} 返回</span><span>單人模式中，P2 的方向鍵與按鍵也可以操作</span></p>`;
+      }
+      if (this.lan()) {
+        return `<p class="keys-hint"><span>你是 PLAYER ${this.me()} · ${nav(1)} · ${kbd(1, 'attack')} 準備 · ${kbd(1, 'sub')} 取消</span><span>鍵盤左右兩側都能操作 · 雙方都準備好就進入下一步</span></p>`;
       }
       return `<p class="keys-hint">
           <span>P1 ${nav(1)} · ${kbd(1, 'attack')} 準備 · ${kbd(1, 'sub')} 返回</span>
@@ -317,7 +377,7 @@
         const stats = [['HP', m.hp, st.hpMax], ['SPEED', m.spd, st.walkSpeed], ['ARMOR', m.arm, `-${m.arm * 6}%`],
           ['ENERGY', m.en, st.energyMax], ['BOOST', m.bst, st.fuelMax]];
         return `<section class="side panel p${p} ${this.ready[p] ? 'is-ready' : ''}">
-            <div class="who"><span>PLAYER ${p}</span><span class="tag ${this.ready[p] ? 'ready' : ''}">${this.ready[p] ? 'READY' : '選擇中'}</span></div>
+            <div class="who"><span>PLAYER ${p}${this.whoTag(p)}</span><span class="tag ${this.ready[p] ? 'ready' : ''}">${this.ready[p] ? 'READY' : '選擇中'}</span></div>
             <div class="pick-name"><span class="code">${m.code}</span> ${m.name}<span class="role">${m.role}</span></div>
             <div class="cards c2">${GD.MECHS.map((x) => `<button class="card ${x.id === m.id ? 'sel' : ''}" data-act="mech" data-p="${p}" data-id="${x.id}">
               <span class="nm">${x.name}</span><span class="cd">${x.code} · ${x.role}</span></button>`).join('')}</div>
@@ -338,8 +398,7 @@
       return `<div class="detail">
           <div class="d-name">${w.name}<span>${w.zh}</span></div>
           <div class="d-facts">${facts.map((t) => `<span>${t}</span>`).join('')}</div>
-          <div class="d-aff"><span class="pill ${w.earth}">地球 ${AFF[w.earth]}</span>${w.earthNote}</div>
-          <div class="d-aff"><span class="pill ${w.space}">太空 ${AFF[w.space]}</span>${w.spaceNote}</div>
+          ${GD.STAGE_ORDER.map((sid) => `<div class="d-aff"><span class="pill ${GD.aff(w, sid)}">${GD.STAGES[sid].zh} ${AFF[GD.aff(w, sid)]}</span>弱點：${w.st[sid].con}</div>`).join('')}
           <div class="d-note">${w.note}</div>
         </div>`;
     }
@@ -354,7 +413,7 @@
             data-act="weapon" data-p="${p}" data-id="${w.id}"><span class="nm">${w.zh}</span><span class="cd">DMG <b>${w.dmg}</b></span></button>`;
         const slotCls = (r) => `slot ${r === c.row && !this.ready[p] ? 'active' : ''}`;
         return `<section class="side panel p${p} ${this.ready[p] ? 'is-ready' : ''}">
-            <div class="who"><span>PLAYER ${p} · ${m.name}</span><span class="tag ${this.ready[p] ? 'ready' : ''}">${this.ready[p] ? 'READY' : '配置中'}</span></div>
+            <div class="who"><span>PLAYER ${p}${this.whoTag(p)} · ${m.name}</span><span class="tag ${this.ready[p] ? 'ready' : ''}">${this.ready[p] ? 'READY' : '配置中'}</span></div>
             <div class="${slotCls(0)}"><div class="lbl">遠程武器</div>
               <div class="cards c2">${slots[0].map((w, col) => card(w, 0, col)).join('')}</div></div>
             <div class="${slotCls(1)}"><div class="lbl">近戰武器</div>
@@ -380,16 +439,18 @@
         const cpu = p === 2 && this.solo();
         const pk = cpu ? this.act.cpuPicks() : this.app.picks[p];
         const r = GD.weaponById(pk.ranged), me = GD.weaponById(pk.melee);
-        const row = (w) => `<div><span class="pill ${w[sid]}">${AFF[w[sid]]}</span>${w.name} · ${w[sid + 'Note']}</div>`;
+        const row = (w) => `<div><span class="pill ${GD.aff(w, sid)}">${AFF[GD.aff(w, sid)]}</span><span>${w.name} · ${w.st[sid].pro}<em>弱點：${w.st[sid].con}</em></span></div>`;
         const who = cpu ? `CPU ${GD.AI_LEVELS[this.app.cpuLevel].label} · ${mechOf(pk.mech).name}` : `PLAYER ${p} · ${mechOf(pk.mech).name}`;
         const why = cpu && pk.reasons ? `<div class="why">${pk.reasons.map((t) => `<span>${t}</span>`).join('')}</div>` : '';
         return `<div class="mu panel p${p}"><div class="who"><span>${who}</span>${cpu ? '<span class="tag ready">自動配置</span>' : ''}</div>${row(r)}${row(me)}${why}</div>`;
       };
       return `<div class="scr-head"><h2>SELECT STAGE · 選擇場景</h2><span class="step">STEP 3 / 3 · 場景重力會改變所有實體彈藥的軌跡</span></div>
-        <div class="stage-cards">${card('earth')}${card('space')}</div>
+        <div class="stage-cards">${GD.STAGE_ORDER.map(card).join('')}</div>
         <div class="matchup">${mu(1)}${mu(2)}</div>
-        <p class="keys-hint"><span>任一玩家 ${kbd(1, 'left')}${kbd(1, 'right')} 或 ${kbd(2, 'left')}${kbd(2, 'right')} 切換場景 · ${kbd(1, 'sub')} / ${kbd(2, 'sub')} 返回</span>
-          <button class="go" data-act="start">開始對戰 ${kbd(1, 'attack')} ${kbd(2, 'attack')} <kbd>Enter</kbd></button></p>`;
+        ${this.guest()
+          ? '<p class="keys-hint"><span>由主機（PLAYER 1）選擇場景並開始對戰，請稍候。</span></p>'
+          : `<p class="keys-hint"><span>任一玩家 ${kbd(1, 'left')}${kbd(1, 'right')} 或 ${kbd(2, 'left')}${kbd(2, 'right')} 切換場景 · ${kbd(1, 'sub')} / ${kbd(2, 'sub')} 返回</span>
+          <button class="go" data-act="start">開始對戰 ${kbd(1, 'attack')} ${kbd(2, 'attack')} <kbd>Enter</kbd></button></p>`}`;
     }
 
     html_cpu() {
@@ -401,6 +462,36 @@
       return `<div class="scr-head"><h2>VS CPU · 電腦強度</h2><span class="step">單人模式 · 電腦會在你選好場景後自動配置機體與武器</span></div>
         <div class="lvls">${items}</div>
         <p class="keys-hint"><span>${kbd(1, 'up')}${kbd(1, 'down')} 或 ${kbd(2, 'up')}${kbd(2, 'down')} 選擇 · ${kbd(1, 'attack')} / <kbd>Enter</kbd> 確認 · ${kbd(1, 'sub')} 返回</span></p>`;
+    }
+
+    html_lan() {
+      const net = this.app.net;
+      const note = this.app.lanNote ? `<p class="lan-note">${this.app.lanNote}</p>` : '';
+      let body;
+      if (!net.supported) {
+        body = `<p>區域網路對戰需要透過遊戲內附的小型伺服器開啟。目前這個頁面是直接開檔或在預覽中執行，無法連線。</p>
+          <ol>
+            <li>在其中一台電腦安裝 Node.js，在專案資料夾執行：<code>node server/lan-server.js</code></li>
+            <li>畫面會顯示網址，例如 <code>http://192.168.1.20:8080</code>。</li>
+            <li>兩台電腦都用瀏覽器打開那個網址，選「區域網路對戰」。</li>
+          </ol>
+          <p class="muted">兩台電腦要在同一個 Wi-Fi 或區域網路。先連上的是主機（PLAYER 1）。</p>`;
+      } else if (net.status === 'connecting') {
+        body = '<p class="lan-big">連線到伺服器中…</p>';
+      } else if (net.status === 'online' && !net.peer) {
+        body = `<p class="lan-big">你是 PLAYER ${net.player}${net.isHost ? '（主機）' : ''}，等待對手連線…</p>
+          <p>請另一台電腦用瀏覽器打開：</p>${net.links.map((u) => `<p class="lan-url">${u}</p>`).join('')}`;
+      } else if (net.status === 'online') {
+        body = `<p class="lan-big">對手已連線，準備進入選擇機體。</p>`;
+      } else if (net.status === 'full') {
+        body = '<p class="lan-big">房間已滿，已經有兩位玩家在線上。</p>';
+      } else {
+        body = `<p class="lan-big">沒有連上伺服器。</p><p>請確認伺服器還在執行，然後按 ${kbd(1, 'attack')} 重試。</p>`;
+      }
+      return `<div class="scr-head"><h2>LAN · 區域網路對戰</h2><span class="step">兩台電腦各自用自己的鍵盤或按鈕操作</span></div>
+        <div class="modal panel lan">${note}${body}
+          <div class="lan-actions"><button class="readybtn" data-act="lanretry">重新連線 ${kbd(1, 'attack')}</button>
+          <button class="readybtn" data-act="menu" data-id="title">返回標題 ${kbd(1, 'sub')}</button></div></div>`;
     }
 
     html_pause() {
@@ -430,7 +521,7 @@
             <li>切換武器後要等 ${GD.COMBAT.switchCooldown} 秒才能再切換，剛換上的武器有 ${GD.COMBAT.switchLag} 秒出手準備。</li>
             <li>火神砲在任何模式都能用，可以擊落火箭砲與榴彈。</li>
             <li>單人模式中，鍵盤左右兩側的按鍵都能操作你的機體。</li>
-            <li><kbd>Esc</kbd> 暫停 · <kbd>\`</kbd> 除錯資訊</li>
+            <li><kbd>Esc</kbd> 暫停 · <kbd>M</kbd> 音效開關 · <kbd>\`</kbd> 除錯資訊</li>
           </ul>
           <button class="readybtn" data-act="back">返回 <kbd>Enter</kbd></button>
         </div>`;

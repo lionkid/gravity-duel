@@ -59,10 +59,50 @@
       c.height = H * this.dpr;
       const g = c.getContext('2d');
       g.scale(this.dpr, this.dpr);
-      const rnd = seeded(stage.id === 'earth' ? 11 : 7);
+      const rnd = seeded(stage.id === 'earth' ? 11 : stage.id === 'moon' ? 19 : 7);
       const gy = GD.ARENA.groundY;
 
-      if (stage.gravity > 0) {
+      if (stage.id === 'moon') {
+        // Black sky, hard sunlight, the Earth hanging above a lunar base.
+        g.fillStyle = '#05060b';
+        g.fillRect(0, 0, W, gy);
+        for (let i = 0; i < 180; i++) {
+          g.fillStyle = `rgba(220,226,255,${0.35 + rnd() * 0.65})`;
+          const s2 = rnd() < 0.1 ? 1.8 : 0.9;
+          g.fillRect(rnd() * W, rnd() * gy * 0.9, s2, s2);
+        }
+        const ex = 760, ey = 110, er = 46;
+        const halo = g.createRadialGradient(ex, ey, er * 0.9, ex, ey, er * 1.5);
+        halo.addColorStop(0, 'rgba(110,180,255,0.35)'); halo.addColorStop(1, 'rgba(110,180,255,0)');
+        g.fillStyle = halo; g.beginPath(); g.arc(ex, ey, er * 1.5, 0, Math.PI * 2); g.fill();
+        const earthBody = g.createRadialGradient(ex - 16, ey - 18, 4, ex, ey, er);
+        earthBody.addColorStop(0, '#7cc4f0'); earthBody.addColorStop(0.6, '#2c6fae'); earthBody.addColorStop(1, '#0d2a4d');
+        g.fillStyle = earthBody; g.beginPath(); g.arc(ex, ey, er, 0, Math.PI * 2); g.fill();
+        g.fillStyle = 'rgba(5,6,11,0.55)'; g.beginPath(); g.arc(ex + 18, ey + 6, er, 0, Math.PI * 2); g.fill();   // night side
+        // Distant crater rims.
+        g.fillStyle = '#3a3d45';
+        g.beginPath(); g.moveTo(0, gy);
+        for (let x = 0; x <= W; x += 40) g.lineTo(x, gy - 30 - Math.abs(Math.sin(x * 0.011)) * 40 - rnd() * 10);
+        g.lineTo(W, gy); g.fill();
+        // Base modules: domes and a comms mast.
+        for (const [x, r] of [[90, 46], [300, 30], [860, 54]]) {
+          g.fillStyle = '#5b606b'; g.beginPath(); g.arc(x, gy, r, Math.PI, 0); g.fill();
+          g.fillStyle = 'rgba(255,214,140,0.8)'; g.fillRect(x - 6, gy - r * 0.45, 12, 4);
+        }
+        g.fillStyle = '#6a707c'; g.fillRect(560, gy - 150, 4, 150); g.fillRect(546, gy - 150, 32, 4);
+        // Regolith.
+        const ground = g.createLinearGradient(0, gy, 0, H);
+        ground.addColorStop(0, '#8d9099'); ground.addColorStop(1, '#45474d');
+        g.fillStyle = ground; g.fillRect(0, gy, W, H - gy);
+        g.strokeStyle = '#c9ccd4'; g.lineWidth = 2;
+        g.beginPath(); g.moveTo(0, gy + 1); g.lineTo(W, gy + 1); g.stroke();
+        for (let i = 0; i < 9; i++) {
+          const cx = rnd() * W, cy = gy + 14 + rnd() * (H - gy - 24), rx = 14 + rnd() * 30;
+          g.fillStyle = 'rgba(40,42,48,0.45)'; g.beginPath(); g.ellipse(cx, cy, rx, rx * 0.25, 0, 0, Math.PI * 2); g.fill();
+          g.strokeStyle = 'rgba(220,224,232,0.35)'; g.lineWidth = 1; g.beginPath(); g.ellipse(cx, cy - 1, rx, rx * 0.25, 0, Math.PI, 0); g.stroke();
+        }
+        this.paintPlatforms(g, stage, gy, '#7a808c', '#d8dce4');
+      } else if (stage.gravity > 0) {
         const sky = g.createLinearGradient(0, 0, 0, gy);
         sky.addColorStop(0, '#0d1d38');
         sky.addColorStop(0.6, '#2f5f8f');
@@ -109,22 +149,7 @@
           g.beginPath(); g.moveTo(x, gy + 6); g.lineTo(x - 30, H); g.stroke();
         }
 
-        // Platforms: steel girders on support pillars.
-        for (const p of stage.platforms) {
-          g.fillStyle = 'rgba(40,46,60,0.9)';
-          g.fillRect(p.x + 16, p.y + p.h, 10, gy - p.y - p.h);
-          g.fillRect(p.x + p.w - 26, p.y + p.h, 10, gy - p.y - p.h);
-          g.fillStyle = '#4a5162';
-          g.fillRect(p.x, p.y, p.w, p.h);
-          g.fillStyle = '#aab3c6';
-          g.fillRect(p.x, p.y, p.w, 3);
-          g.strokeStyle = '#2b3040';
-          g.beginPath();
-          for (let x = p.x + 6; x < p.x + p.w - 6; x += 14) {
-            g.moveTo(x, p.y + p.h); g.lineTo(x + 7, p.y + 4); g.lineTo(x + 14, p.y + p.h);
-          }
-          g.stroke();
-        }
+        this.paintPlatforms(g, stage, gy, '#4a5162', '#aab3c6');
       } else {
         g.fillStyle = '#04050b';
         g.fillRect(0, 0, W, H);
@@ -160,6 +185,25 @@
         g.setLineDash([]);
       }
       return c;
+    }
+
+    // Steel girders on support pillars.
+    paintPlatforms(g, stage, gy, body, top) {
+      for (const p of stage.platforms) {
+        g.fillStyle = 'rgba(40,46,60,0.9)';
+        g.fillRect(p.x + 16, p.y + p.h, 10, gy - p.y - p.h);
+        g.fillRect(p.x + p.w - 26, p.y + p.h, 10, gy - p.y - p.h);
+        g.fillStyle = body;
+        g.fillRect(p.x, p.y, p.w, p.h);
+        g.fillStyle = top;
+        g.fillRect(p.x, p.y, p.w, 3);
+        g.strokeStyle = '#2b3040';
+        g.beginPath();
+        for (let x = p.x + 6; x < p.x + p.w - 6; x += 14) {
+          g.moveTo(x, p.y + p.h); g.lineTo(x + 7, p.y + 4); g.lineTo(x + 14, p.y + p.h);
+        }
+        g.stroke();
+      }
     }
 
     // Turn physics events into particles.
@@ -715,7 +759,7 @@
     drawLoadoutReadout(f, left) {
       const ctx = this.ctx;
       const keys = GD.BINDINGS[f.player];
-      const k = (a) => (f.cpu ? 'AUTO' : GD.keyLabel(keys[a][0]));
+      const k = (a) => (f.cpu ? 'AUTO' : f.remote ? 'LAN' : GD.keyLabel(GD.BINDINGS[f.keySet || f.player][a][0]));
       const ammoOf = (w) => {
         if (w.ammo === Infinity) return '∞';
         let t = `${f.ammo[w.id]}/${w.ammo}`;

@@ -61,15 +61,17 @@
       return top;
     };
 
+    const stage = GD.STAGES[stageId] || GD.STAGES.earth;
     const ranged = best(GD.RANGED, (w) => {
-      let s = AFF[w[stageId]];
+      let s = AFF[GD.aff(w, stageId)];
       if (hard && w.blast && foeMech.arm <= 2) s += 1.2;          // thin armor: splash punishes it
-      if (hard && w.id === 'beam' && foeMech.arm >= 5) s -= 0.6;  // heavy armor shrugs off small hits
+      if (hard && w.light && foeMech.arm >= 5) s -= 1.2;          // light rounds bounce off heavy armor
+      if (hard && w.id === 'beam' && !stage.vacuum) s -= 0.3;      // air scatters beams
       if (hard && w.id === 'mg' && foeRanged.shootable) s += 0.4; // shoots their rockets down too
       return s;
     });
     const melee = best(GD.MELEE, (w) => {
-      let s = AFF[w[stageId]];
+      let s = AFF[GD.aff(w, stageId)];
       if (hard && w.id === 'axe' && foeMech.arm >= 4) s += 0.8;   // guard break against sturdy frames
       if (hard && w.id === 'lance' && foeMech.spd >= 5) s += 0.6; // reach against fast frames
       return s;
@@ -77,13 +79,14 @@
     const mech = best(GD.MECHS, (m) => {
       let s = 0;
       if (stageId === 'space') s += (m.bst - 4) * 0.8 + (m.spd - 4) * 0.4;
+      else if (stageId === 'moon') s += (m.bst - 4) * 0.4 + (m.spd - 4) * 0.3 + (m.hp - 4) * 0.3;
       else s += (m.arm - 4) * 0.6 + (m.hp - 4) * 0.4;
       if (ranged.id === 'beam') s += (m.en - 4) * 0.5;
       if (hard && foeRanged.blast) s += (m.arm - 3) * 0.5;       // expect splash, bring armor
       return s;
     });
 
-    reasons.push(`${stageId === 'space' ? '太空' : '地球'}${AFF[ranged[stageId]] > 1 ? '有利' : '穩定'}：${ranged.zh}，${ranged[stageId + 'Note']}`);
+    reasons.push(`${stage.zh}${AFF[GD.aff(ranged, stageId)] > 1 ? '有利' : '穩定'}：${ranged.zh}，${ranged.st[stageId].pro}`);
     if (hard) {
       if (ranged.blast && foeMech.arm <= 2) reasons.push(`你的 ${foeMech.name} 裝甲薄，用爆風武器針對`);
       else if (melee.id === 'axe' && foeMech.arm >= 4) reasons.push(`你的 ${foeMech.name} 耐打，用戰斧破防`);
@@ -189,7 +192,8 @@
     if (wantMelee !== melee && me.switchCd <= 0 && me.switchLag <= 0 && r() < P.smart) plan.sw = true;
 
     // --- movement toward the preferred distance
-    const ideal = melee ? Math.max(30, w.range * 0.6) : idealRange(w, earth);
+    // Long weapons are played at their tip: a lance that walks into saber range wastes its reach.
+    const ideal = melee ? Math.max(30, w.range * (w.style === 'lance' ? 0.85 : 0.6)) : idealRange(w, earth);
     const nearWall = (d) => (d < 0 ? me.x < 90 : me.x > A.w - 90);
     let mx = 0;
     if (adx > ideal + 50) mx = dir;

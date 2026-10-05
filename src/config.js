@@ -11,9 +11,13 @@
   GD.ARENA = { w: 960, h: 540, groundY: 470, ceilingY: 60 };  // ceilingY keeps mechs below the HUD
 
   // Gravity is in px/s^2. 1260 px/s^2 is our "1.0 G".
+  // ground: has a floor and walks; vacuum: no air (beams keep their power, blasts lose their shockwave,
+  // heat leaves slowly); jumpScale: jump speed multiplier; recoil: how much firing pushes the shooter back.
+  GD.STAGE_ORDER = ['earth', 'moon', 'space'];
   GD.STAGES = {
     earth: {
-      id: 'earth', name: 'EARTH', label: 'EARTH · 1.0 G', gravity: 1260,
+      id: 'earth', name: 'EARTH', zh: '地球', label: 'EARTH · 1.0 G', gravity: 1260,
+      ground: true, vacuum: false, jumpScale: 1, recoil: { ground: 0, air: 0.3 },
       // One-way platforms: x = left edge, y = top surface.
       platforms: [
         { x: 230, y: 360, w: 150, h: 14 },
@@ -21,14 +25,26 @@
         { x: 415, y: 250, w: 130, h: 14 },
       ],
     },
+    moon: {
+      id: 'moon', name: 'MOON', zh: '月面基地', label: 'MOON · 0.17 G', gravity: 214,
+      ground: true, vacuum: true, jumpScale: 0.6, recoil: { ground: 0.3, air: 0.7 },
+      // Two tall towers and a high bridge: low gravity makes the upper level reachable with one jump.
+      platforms: [
+        { x: 130, y: 330, w: 140, h: 14 },
+        { x: 690, y: 330, w: 140, h: 14 },
+        { x: 390, y: 200, w: 180, h: 14 },
+      ],
+    },
     space: {
-      id: 'space', name: 'SPACE', label: 'SPACE · 0 G', gravity: 0,
+      id: 'space', name: 'SPACE', zh: '太空', label: 'SPACE · 0 G', gravity: 0,
+      ground: false, vacuum: true, jumpScale: 1, recoil: { ground: 1, air: 1 },
       platforms: [],
     },
   };
 
   GD.START = {
     earth: { 1: { x: 170, y: 470 }, 2: { x: 790, y: 470 } },
+    moon: { 1: { x: 170, y: 470 }, 2: { x: 790, y: 470 } },
     space: { 1: { x: 200, y: 320 }, 2: { x: 760, y: 320 } },
   };
 
@@ -81,37 +97,71 @@
   // ---- Combat ----
   // Each frame carries one ranged and one melee weapon and swaps between them in battle.
   // Gravity coefficient g: projectile fall = stage gravity × COMBAT.gravityScale × g. Speeds px/s, times s.
-  // earth / space: 'good' | 'even' | 'bad' affinity shown on the loadout screen.
+  // st[stage] = { aff, pro, con }: every weapon has a concrete weakness on every stage (aff: good | even | bad).
+  // recoil: px/s pushed back on the shooter, scaled by the stage recoil factor.
   GD.RANGED = [
     { id: 'beam', name: 'BEAM RIFLE', zh: '光束步槍', kind: 'projectile', dmg: 70, speed: 900, g: 0.0, cooldown: 0.55, energy: 30, ammo: Infinity,
       knock: 180, stun: 0.25, radius: 4, color: '#ff5ad6', trail: 46, passPlatforms: true, lifetime: 1.6, aimSpread: 30,
-      earth: 'even', space: 'even', earthNote: '不受重力，彈道最好預測', spaceNote: '不受重力，彈道最好預測', note: '每發耗 30 能量，能量不夠就打不出來' },
-    { id: 'bazooka', name: 'HYPER BAZOOKA', zh: '火箭砲', kind: 'projectile', dmg: 130, speed: 520, g: 1.0, cooldown: 1.1, energy: 0, ammo: 4, reload: 2.4,
+      falloff: 0.45, recoil: 60, note: '每發耗 30 能量，能量不夠就打不出來',
+      st: {
+        earth: { aff: 'even', pro: '不受重力，彈道最好預測', con: '大氣會削弱光束，越遠傷害越低' },
+        moon:  { aff: 'good', pro: '真空不衰減，彈道筆直', con: '真空散熱慢，能量回復變慢' },
+        space: { aff: 'even', pro: '真空不衰減，彈道筆直', con: '能量回復變慢，後座力讓你後退' },
+      } },
+    { id: 'bazooka', name: 'HYPER BAZOOKA', zh: '火箭砲', kind: 'projectile', dmg: 140, speed: 560, g: 1.0, cooldown: 1.0, energy: 0, ammo: 4, reload: 2.2,
       knock: 440, stun: 0.45, radius: 8, color: '#ffb347', blast: 120, blastDmg: 55, shootable: true, lifetime: 6, aimSpread: 30,
-      earth: 'bad', space: 'good', earthNote: '明顯下墜，要跳起來往上拋射', spaceNote: '直線飛行，最強遠距武器', note: '爆風半徑 120，可以被子彈擊落' },
-    { id: 'mg', name: 'MACHINE GUN', zh: '機槍', kind: 'projectile', dmg: 15, speed: 720, g: 0.6, cooldown: 0.09, energy: 0, ammo: 60, reload: 0.12, auto: true,
-      knock: 35, stun: 0.08, radius: 3, color: '#ffe066', spread: 3, lifetime: 3, aimSpread: 30,
-      earth: 'good', space: 'even', earthNote: '略微下墜，近中距離壓制', spaceNote: '直線飛行，但單發傷害低', note: '按住連射，60 發' },
-    { id: 'grenade', name: 'CRACKER', zh: '榴彈', kind: 'projectile', dmg: 90, speed: 560, g: 1.5, cooldown: 0.9, energy: 0, ammo: 6, reload: 2.0,
-      knock: 340, stun: 0.4, radius: 7, color: '#7fff7f', blast: 150, blastDmg: 75, selfDamage: true, fuse: 3.0, lob: -35, shootable: true, lifetime: 6, aimSpread: 25,
-      wallBurst: true,
-      earth: 'good', space: 'bad', earthNote: '拋物線越過平台，落地爆炸', spaceNote: '無法拋投，撞到場地邊界才爆', note: '爆風半徑 150，碰到地面或邊界就爆，也會炸到自己' },
+      recoil: 160, note: '爆風半徑 120，可以被子彈擊落',
+      st: {
+        earth: { aff: 'bad', pro: '爆風完整，打地面也能炸到人', con: '明顯下墜，要跳起來往上拋射' },
+        moon:  { aff: 'even', pro: '幾乎直線飛行', con: '真空爆風變小，後座力會推動機體' },
+        space: { aff: 'even', pro: '直線飛行，直擊傷害最高', con: '真空爆風變小，飛得慢會被火神砲攔截' },
+      } },
+    { id: 'mg', name: 'MACHINE GUN', zh: '機槍', kind: 'projectile', dmg: 10, speed: 720, g: 0.6, cooldown: 0.1, energy: 0, ammo: 45, reload: 0.15, auto: true,
+      knock: 20, stun: 0.02, radius: 3, color: '#ffe066', spread: 5, lifetime: 3, aimSpread: 30, light: true,
+      recoil: 16, note: '按住連射，45 發；小口徑對高裝甲吃虧',
+      st: {
+        earth: { aff: 'even', pro: '站在地上連射不受後座力影響', con: '小口徑被裝甲克制，打重裝機很痛苦' },
+        moon:  { aff: 'even', pro: '彈道接近直線', con: '連射後座力會把你推離地面' },
+        space: { aff: 'even', pro: '子彈直線飛行', con: '連射後座力會讓你一直往後飄' },
+      } },
+    { id: 'grenade', name: 'CRACKER', zh: '榴彈', kind: 'projectile', dmg: 80, speed: 560, g: 1.5, cooldown: 0.75, energy: 0, ammo: 6, reload: 1.8,
+      knock: 340, stun: 0.45, radius: 7, color: '#7fff7f', blast: 150, blastDmg: 90, selfDamage: true, fuse: 3.0, lob: -35, lifetime: 6, aimSpread: 25,
+      wallBurst: true, recoil: 90, note: '爆風半徑 150，碰到地面或邊界就爆，也會炸到自己；體積小打不下來',
+      st: {
+        earth: { aff: 'good', pro: '拋物線越過平台，爆風最大', con: '彈速慢容易被閃開，太近會炸到自己' },
+        moon:  { aff: 'even', pro: '可以拋到很遠', con: '重力太小會拋過頭，要壓低射角' },
+        space: { aff: 'even', pro: '撞到邊界或 3 秒後空爆', con: '無法拋投，真空爆風也變小' },
+      } },
   ];
   GD.MELEE = [
-    { id: 'saber', name: 'BEAM SABER', zh: '光束軍刀', kind: 'melee', style: 'saber', dmg: 220, windup: 0.10, active: 0.15, recovery: 0.30,
-      range: 70, dashRange: 30, knock: 420, stun: 0.45, color: '#ff7a1a', iframes: 0.067, guardMul: 0.25,
-      earth: 'even', space: 'even', earthNote: '出刀最快，跳斬好用', spaceNote: '衝刺斬最穩', note: '出刀瞬間 4 幀無敵' },
-    { id: 'axe', name: 'HEAT AXE', zh: '熱能戰斧', kind: 'melee', style: 'axe', dmg: 300, windup: 0.24, active: 0.14, recovery: 0.50,
-      range: 58, dashRange: 26, knock: 560, stun: 0.65, color: '#ff4d2a', iframes: 0, guardMul: 0.5,
-      earth: 'good', space: 'bad', earthNote: '站穩重擊，破防最強', spaceNote: '前搖長，漂移中容易揮空', note: '對方防禦也會吃一半傷害' },
-    { id: 'lance', name: 'BEAM LANCE', zh: '光束長槍', kind: 'melee', style: 'lance', dmg: 170, windup: 0.14, active: 0.18, recovery: 0.38,
-      range: 120, dashRange: 40, knock: 380, stun: 0.4, color: '#5ad2ff', iframes: 0, guardMul: 0.25,
-      earth: 'even', space: 'good', earthNote: '長距離刺擊，壓制落地點', spaceNote: '直線突刺，配合慣性衝鋒', note: '攻擊距離 120，傷害較低' },
+    { id: 'saber', name: 'BEAM SABER', zh: '光束軍刀', kind: 'melee', style: 'saber', dmg: 190, windup: 0.10, active: 0.15, recovery: 0.41,
+      range: 70, dashRange: 35, knock: 420, stun: 0.45, color: '#ff7a1a', iframes: 0.067, guardMul: 0.25, note: '出刀瞬間 4 幀無敵',
+      st: {
+        earth: { aff: 'good', pro: '出刀最快，跳斬好用', con: '距離最短，要貼身才打得到' },
+        moon:  { aff: 'even', pro: '從上方跳斬切入', con: '滯空太久，落地前容易被射' },
+        space: { aff: 'bad', pro: '衝刺斬最穩', con: '接近要燒燃料，被長槍拉開距離很吃虧' },
+      } },
+    { id: 'axe', name: 'HEAT AXE', zh: '熱能戰斧', kind: 'melee', style: 'axe', dmg: 280, windup: 0.2, active: 0.14, recovery: 0.48,
+      range: 64, dashRange: 30, knock: 560, stun: 0.65, color: '#ff4d2a', iframes: 0, guardMul: 0.5, superArmor: true,
+      note: '對方防禦也會吃一半傷害；揮動中被打不會中斷',
+      st: {
+        earth: { aff: 'even', pro: '站穩重擊，揮動中不會被打斷', con: '前搖長，軍刀可以先砍到你' },
+        moon:  { aff: 'even', pro: '破防重擊', con: '前搖長加上慢速落地，時機難抓' },
+        space: { aff: 'even', pro: '一擊傷害最高，霸體硬吃子彈', con: '漂移中前搖長，很容易揮空' },
+      } },
+    { id: 'lance', name: 'BEAM LANCE', zh: '光束長槍', kind: 'melee', style: 'lance', dmg: 195, windup: 0.15, active: 0.2, recovery: 0.4,
+      range: 130, dashRange: 40, knock: 380, stun: 0.4, color: '#5ad2ff', iframes: 0, guardMul: 0.25, note: '攻擊距離 130，傷害較低',
+      st: {
+        earth: { aff: 'bad', pro: '距離最長，壓制落地點', con: '只刺得到中段，跳起來的對手刺不到' },
+        moon:  { aff: 'even', pro: '距離長，等對手落下再刺', con: '對手跳得高，高度一錯開就刺空' },
+        space: { aff: 'good', pro: '直線突刺配合慣性衝鋒', con: '刺擊範圍窄，上下錯開就落空' },
+      } },
   ];
   GD.WEAPONS = GD.RANGED.concat(GD.MELEE);
+  GD.aff = (w, stageId) => (w.st && w.st[stageId] ? w.st[stageId].aff : 'even');
   // Head vulcan: built into every frame, fired with its own key in either weapon mode.
   GD.VULCAN = { id: 'vulcan', name: 'VULCAN', zh: '火神砲', kind: 'projectile', dmg: 6, speed: 820, g: 0.5, cooldown: 0.07, energy: 0, ammo: 48, reload: 0.2, auto: true,
-    knock: 12, stun: 0.04, radius: 2, color: '#fff3a8', spread: 4, lifetime: 2.5, aimSpread: 30, muzzle: [10, 80] };
+    knock: 12, stun: 0.04, radius: 2, color: '#fff3a8', spread: 4, lifetime: 2.5, aimSpread: 30, muzzle: [10, 80], light: true, recoil: 6 };
 
   GD.COMBAT = {
     muzzleX: 30, muzzleY: 52,          // offset from feet center
@@ -128,6 +178,11 @@
     lowEnergyFlash: 0.4,
     projectileVsProjectile: 20,        // extra hit radius when shooting down rockets (vulcan fires from head height)
     koFallStun: 1.0,
+    beamFalloffRange: 700,             // in air, beam damage drops by `falloff` over this distance
+    vacuumBlast: 0.65,                 // blast radius multiplier without air
+    vacuumBlastDmg: 0.8,               // blast damage multiplier without air
+    vacuumEnergyRegen: 0.5,            // energy recovers slower without air to carry heat away
+    lightArmorMul: 1.6,                // armor counts this much more against light rounds (MG, vulcan)
   };
 
   // Keyboard bindings use KeyboardEvent.code so they are layout independent.

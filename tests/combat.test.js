@@ -19,6 +19,7 @@ function place(world, x1, x2) {
   a.x = x1; b.x = x2; a.facing = 1; b.facing = -1;
 }
 const taken = (f) => f.stats.hpMax - f.hp;
+const D = (id) => GD.weaponById(id).dmg;
 let passed = 0;
 function test(name, fn) { fn(); passed++; console.log('  ok  ' + name); }
 
@@ -29,10 +30,10 @@ test('beam flies straight on Earth; bazooka drops with gravity', () => {
   run(w, 1, () => tap('attack'), () => tap('attack'));
   const [beam, rocket] = w.projectiles;
   const y0b = beam.y, y0r = rocket.y;
-  run(w, 20);
+  run(w, 12);                // before the two shots cross (the beam would shoot the rocket down)
   assert.strictEqual(w.projectiles.length, 2);
   assert.ok(Math.abs(beam.y - y0b) < 1e-6, 'beam moved vertically');
-  assert.ok(rocket.y - y0r > 15, 'rocket did not drop: ' + (rocket.y - y0r));
+  assert.ok(rocket.y - y0r > 6, 'rocket did not drop: ' + (rocket.y - y0r));
 });
 
 test('same bazooka shot stays level in space', () => {
@@ -74,16 +75,17 @@ test('grenade in space flies flat and self-destructs after its fuse', () => {
 });
 
 // ---- damage model ----
-test('ranged damage is lower: beam hit deals 70 scaled by armor', () => {
-  const w = GD.createWorld('earth', 'ax01', 'ax07', lo('beam'));
+test('beam hit deals its damage scaled by armor (in vacuum, no falloff)', () => {
+  const w = GD.createWorld('space', 'ax01', 'ax07', lo('beam'));
   place(w, 300, 500);
+  w.fighters[1].y = w.fighters[0].y;
   const target = w.fighters[1];
   let maxStun = 0;
   for (let i = 0; i < 30; i++) {
     GD.stepWorld(w, [i === 0 ? tap('attack') : idle(), idle()], GD.DT);
     maxStun = Math.max(maxStun, target.hitstun);
   }
-  assert.strictEqual(taken(target), Math.round(70 * (1 - 5 * GD.COMBAT.armorPerPoint)));
+  assert.strictEqual(taken(target), Math.round(D('beam') * (1 - 5 * GD.COMBAT.armorPerPoint)));
   assert.ok(maxStun > 0.2, 'no stun');
 });
 
@@ -93,11 +95,11 @@ test('bazooka direct hit deals its full direct damage (was only splash before)',
   w.fighters[1].y = w.fighters[0].y;
   run(w, 40, (i) => (i === 0 ? tap('attack') : idle()));
   const t = w.fighters[1];
-  assert.strictEqual(taken(t), Math.round(130 * t.stats.damageTaken));
+  assert.strictEqual(taken(t), Math.round(D('bazooka') * t.stats.damageTaken));
 });
 
-test('explosive blast radius is wide: bazooka splash reaches 100 px away', () => {
-  const w = GD.createWorld('space', 'ax01', 'ax01', lo('bazooka'));
+test('explosive blast radius is wide in air: bazooka splash reaches 100 px away on Earth', () => {
+  const w = GD.createWorld('earth', 'ax01', 'ax01', lo('bazooka'));
   const [a, b] = w.fighters;
   place(w, 100, 600);
   b.y = a.y - 200;           // well off the shot line
@@ -126,7 +128,7 @@ test('melee hits much harder than ranged', () => {
   place(w, 300, 360);
   a.mode = 'melee';
   run(w, 30, (i) => (i === 0 ? tap('attack') : idle()));
-  assert.strictEqual(taken(b), Math.round(220 * b.stats.damageTaken));
+  assert.strictEqual(taken(b), Math.round(D('saber') * b.stats.damageTaken));
 });
 
 test('guarding a frontal shot cuts damage to a quarter', () => {
@@ -134,7 +136,7 @@ test('guarding a frontal shot cuts damage to a quarter', () => {
   place(w, 300, 500);
   const target = w.fighters[1];
   run(w, 30, (i) => (i === 0 ? tap('attack') : idle()), () => Object.assign(idle(), { guard: true }));
-  const full = Math.round(70 * target.stats.damageTaken);
+  const full = Math.round(D('beam') * target.stats.damageTaken);
   assert.ok(taken(target) > 0 && taken(target) <= Math.round(full * 0.25) + 1, 'taken ' + taken(target));
   assert.strictEqual(target.hitstun, 0);
 });
@@ -145,7 +147,7 @@ test('heat axe breaks guard: blocked hit still deals half', () => {
   place(w, 300, 350);
   a.mode = 'melee';
   run(w, 40, (i) => (i === 0 ? tap('attack') : idle()), () => Object.assign(idle(), { guard: true }));
-  assert.strictEqual(taken(b), Math.round(300 * b.stats.damageTaken * 0.5));
+  assert.strictEqual(taken(b), Math.round(D('axe') * b.stats.damageTaken * 0.5));
 });
 
 test('beam lance reaches farther than the saber', () => {
@@ -191,7 +193,8 @@ test('machine gun fires automatically while held', () => {
   place(w, 100, 900);
   run(w, 60, () => Object.assign(idle(), { attack: true }));
   const shots = w.events.filter((e) => e.type === 'fire').length;
-  assert.ok(shots >= 10 && shots <= 12, 'shots ' + shots);
+  const expected = 1 / GD.weaponById('mg').cooldown;   // shots in one second of holding
+  assert.ok(Math.abs(shots - expected) <= 1.5, `shots ${shots}, expected about ${expected}`);
 });
 
 // ---- weapon switching ----
@@ -244,7 +247,7 @@ test('vulcan rounds shoot down an incoming rocket', () => {
   assert.strictEqual(w.projectiles.length, 1);
   run(w, 40, () => Object.assign(idle(), { sub: true }));
   assert.ok(w.events.some((e) => e.type === 'explode'), 'rocket not shot down');
-  assert.ok(taken(a) < Math.round(130 * a.stats.damageTaken), 'took the direct hit');
+  assert.ok(taken(a) < Math.round(D('bazooka') * a.stats.damageTaken), 'took the direct hit');
 });
 
 // ---- melee behaviour ----
@@ -291,7 +294,7 @@ test('every weapon has a weakness in at least one stage or resource', () => {
   for (const w of GD.WEAPONS) {
     const penalised = w.kind === 'melee' || w.energy > 0 || w.g > 0;
     assert.ok(penalised, w.id);
-    assert.ok(['good', 'even', 'bad'].includes(w.earth) && ['good', 'even', 'bad'].includes(w.space), w.id + ' affinity');
+    for (const st of GD.STAGE_ORDER) assert.ok(['good', 'even', 'bad'].includes(GD.aff(w, st)), w.id + ' affinity');
   }
 });
 
@@ -375,6 +378,79 @@ test('the two players never share a key, and each action has a key', () => {
       seen.set(c, p);
     }
   }
+});
+
+// ---- stage weaknesses ----
+test('Earth air weakens beams over distance; vacuum does not', () => {
+  const hitAt = (stage, x2) => {
+    const w = GD.createWorld(stage, 'ax01', 'ax01', lo('beam'));
+    place(w, 100, x2);
+    w.fighters[1].y = w.fighters[0].y;
+    run(w, 90, (i) => (i === 0 ? tap('attack') : idle()));
+    return taken(w.fighters[1]);
+  };
+  assert.ok(hitAt('earth', 800) < hitAt('earth', 250), 'no falloff on Earth');
+  assert.strictEqual(hitAt('space', 800), hitAt('space', 250));
+});
+
+test('blasts shrink in vacuum: same shell, smaller radius on the Moon and in space', () => {
+  for (const stage of ['earth', 'moon', 'space']) {
+    const w = GD.createWorld(stage, 'ax01', 'ax01', lo('bazooka'));
+    const p = GD.combatInternals.spawnProjectile(w, w.fighters[0], GD.weaponById('bazooka'), 0);
+    w.events.length = 0;
+    GD.combatInternals.explode(w, p, null);
+    const r = w.events.find((e) => e.type === 'explode').r;
+    if (stage === 'earth') assert.strictEqual(r, 120);
+    else assert.ok(r < 100, stage + ' radius ' + r);
+  }
+});
+
+test('recoil pushes the shooter back in space and on the Moon, not on Earth ground', () => {
+  const push = (stage) => {
+    const w = GD.createWorld(stage, 'ax01', 'zr06', lo('bazooka'));
+    place(w, 400, 900);
+    run(w, 1, () => tap('attack'));
+    return w.fighters[0].vx;
+  };
+  assert.ok(push('space') < -150, 'space ' + push('space'));
+  assert.ok(push('moon') < -40, 'moon ' + push('moon'));
+  assert.ok(Math.abs(push('earth')) < 1, 'earth ' + push('earth'));
+});
+
+test('light rounds lose more to armor: MG hurts BASTION far less than WRAITH', () => {
+  const dealt = (mech) => {
+    const w = GD.createWorld('space', 'ax01', mech, lo('mg'));
+    const [a, b] = w.fighters;
+    place(w, 300, 500);
+    b.y = a.y;
+    GD.applyHit(w, b, a, { dmg: 15, knock: 0, stun: 0, light: true, x: b.x, y: b.y, dx: 1, dy: 0 });
+    return taken(b);
+  };
+  // Normal armor scaling would give 10.5 vs 13.2; light rounds widen that gap.
+  assert.ok(dealt('ax07') / dealt('zr06') < 0.7, `${dealt('ax07')} vs ${dealt('zr06')}`);
+});
+
+test('every weapon names a weakness on every stage', () => {
+  for (const w of GD.WEAPONS) for (const s of GD.STAGE_ORDER) {
+    assert.ok(w.st[s] && w.st[s].con && w.st[s].con.length > 4, `${w.id} on ${s}`);
+  }
+});
+
+test('Moon: low gravity jumps go higher and hang longer than Earth', () => {
+  const jump = (stage) => {
+    const w = GD.createWorld(stage, 'ax01', 'zr06');
+    const f = w.fighters[0];
+    let top = f.y, air = 0;
+    for (let i = 0; i < 600; i++) {
+      GD.stepWorld(w, [i === 0 ? tap('up') : idle(), idle()], GD.DT);
+      top = Math.min(top, f.y);
+      if (!f.onGround) air++; else if (i > 5) break;
+    }
+    return { apex: GD.ARENA.groundY - top, air };
+  };
+  const e = jump('earth'), m = jump('moon');
+  assert.ok(m.apex > e.apex * 1.6 && m.air > e.air * 2, JSON.stringify({ e, m }));
+  assert.ok(m.apex < GD.ARENA.groundY - GD.ARENA.ceilingY - 84, 'moon jump hits the ceiling');
 });
 
 console.log(`\n${passed} tests passed`);

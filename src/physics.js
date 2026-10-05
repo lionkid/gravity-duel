@@ -62,10 +62,17 @@
   GD.DEFAULT_LOADOUT = { 1: { ranged: 'beam', melee: 'saber' }, 2: { ranged: 'bazooka', melee: 'axe' } };
 
   // loadout = { 1: { ranged, melee }, 2: { ranged, melee } }
-  GD.createWorld = function (stageId, mech1, mech2, loadout) {
+  // Small seeded generator for in-match randomness (weapon spread), so a match replays the same way.
+  function makeRng(seed) {
+    let s = (Math.imul((seed | 0) || 1, 2654435761) >>> 0) % 2147483646 + 1;
+    return () => (s = (s * 16807) % 2147483647) / 2147483647;
+  }
+
+  GD.createWorld = function (stageId, mech1, mech2, loadout, seed) {
     const stage = GD.STAGES[stageId];
     const lo = loadout || GD.DEFAULT_LOADOUT;
     const world = {
+      rnd: makeRng(seed == null ? Math.floor(Math.random() * 1e9) : seed),
       stage,
       fighters: [GD.createFighter(1, mech1, stage), GD.createFighter(2, mech2, stage)],
       projectiles: [],
@@ -165,7 +172,7 @@
       if (f.jumpBuf > 0 && f.coyote > 0 && !locked) {
         f.jumpBuf = 0;
         f.coyote = 0;
-        f.vy = -f.stats.jumpVel;
+        f.vy = -f.stats.jumpVel * (world.stage.jumpScale || 1);
         f.onGround = false;
         jumped = true;
         emit(world, 'jump', f);
@@ -180,7 +187,9 @@
       }
 
       if (f.boosting) {
-        f.vy += (g - f.stats.thrustEarth) * dt;
+        // Jet thrust is defined relative to Earth gravity, so the net climb feels the same on any stage.
+        const thrust = g + (f.stats.thrustEarth - GD.STAGES.earth.gravity);
+        f.vy += (g - thrust) * dt;
         if (f.vy < T.boostRiseCap) f.vy = T.boostRiseCap;
         f.thrustX = 0;
         f.thrustY = -1;

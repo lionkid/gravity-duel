@@ -10,7 +10,7 @@
       this.codeMap = new Map();       // key code -> [{ player, action }]
       this.onGlobal = null;           // callback for system keys (pause, debug...)
       this.virtual = { 1: new Set(), 2: new Set() };   // actions held on the on-screen pads
-      this.globalCodes = new Set(['Escape', 'Backquote', 'Enter']);
+      this.globalCodes = new Set(['Escape', 'Backquote', 'Enter', 'KeyM']);
 
       for (const [p, map] of Object.entries(bindings)) {
         this.latch[p] = {};

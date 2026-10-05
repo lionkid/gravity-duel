@@ -31,7 +31,7 @@ function match(l1, l2, stage, seed, limit = 120) {
 
 // ---- loadout choice ----
 test('CPU picks are valid and repeatable for the same seed', () => {
-  for (const level of GD.AI_ORDER) for (const stage of ['earth', 'space']) {
+  for (const level of GD.AI_ORDER) for (const stage of GD.STAGE_ORDER) {
     const a = GD.cpuChoose(level, stage, foe('zr06', 'bazooka', 'axe'), 42);
     const b = GD.cpuChoose(level, stage, foe('zr06', 'bazooka', 'axe'), 42);
     assert.deepStrictEqual(a, b);
@@ -43,9 +43,9 @@ test('CPU picks are valid and repeatable for the same seed', () => {
 });
 
 test('normal and hard never bring a ranged weapon that is weak on the stage', () => {
-  for (const level of ['normal', 'hard']) for (const stage of ['earth', 'space']) for (let s = 1; s <= 60; s++) {
+  for (const level of ['normal', 'hard']) for (const stage of GD.STAGE_ORDER) for (let s = 1; s <= 60; s++) {
     const c = GD.cpuChoose(level, stage, foe(GD.MECHS[s % 4].id, GD.RANGED[s % 4].id, GD.MELEE[s % 3].id), s);
-    assert.notStrictEqual(GD.weaponById(c.ranged)[stage], 'bad', `${level} ${stage} picked ${c.ranged}`);
+    assert.notStrictEqual(GD.aff(GD.weaponById(c.ranged), stage), 'bad', `${level} ${stage} picked ${c.ranged}`);
   }
 });
 
@@ -76,7 +76,7 @@ test('AI input has every key and only reports presses on new holds', () => {
 });
 
 test('the AI fights back: it damages an idle player within 20 s on both stages', () => {
-  for (const stage of ['earth', 'space']) for (const level of GD.AI_ORDER) {
+  for (const stage of GD.STAGE_ORDER) for (const level of GD.AI_ORDER) {
     const c = GD.cpuChoose(level, stage, foe('ax01', 'beam', 'saber'), 3);
     const w = GD.createWorld(stage, 'ax01', c.mech, { 1: { ranged: 'beam', melee: 'saber' }, 2: c });
     const ai = GD.createAI(level, 5);
@@ -86,7 +86,7 @@ test('the AI fights back: it damages an idle player within 20 s on both stages',
 });
 
 test('difficulty ordering holds: hard > normal > easy, and every match finishes', () => {
-  for (const stage of ['earth', 'space']) for (const [hi, lo, need] of [['hard', 'easy', 16], ['normal', 'easy', 15], ['hard', 'normal', 13]]) {
+  for (const stage of GD.STAGE_ORDER) for (const [hi, lo, need] of [['hard', 'easy', 16], ['normal', 'easy', 15], ['hard', 'normal', 13]]) {
     let wins = 0;
     for (let s = 1; s <= 20; s++) {
       const flip = s % 2 === 0;

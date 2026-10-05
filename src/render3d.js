@@ -61,6 +61,15 @@
   // Gameplay (x right, y down, ground at GY) -> world (X right, Y up, Z toward camera, fight plane Z = 0).
   const toWorld = (x, y, z) => [x - CX, GY - y, z || 0];
 
+  // Ground stages share one backdrop routine with their own palette.
+  const LOOKS = {
+    earth: { sky: ['#0b1a33', '#2f5f8f', '#d99a5e'], ground: ['#8a7a66', '#4a3f2c', '#1e1810'], grid: '200,170,120', line: 'rgba(255,200,140,0.35)',
+      sun: { p: [1700, 110, -3900], r: 300, glow: 'rgba(255,190,110,0.9)', glow2: 'rgba(255,150,80,0.25)', fill: '#ffd9a0' } },
+    moon: { sky: ['#030409', '#05060c', '#0a0c14'], ground: ['#9a9da5', '#6b6e76', '#3a3c42'], grid: '230,232,240', line: 'rgba(220,228,255,0.35)',
+      stars: true, planet: { p: [-1500, 1300, -4200], r: 360 },
+      sun: { p: [2600, 1800, -2400], r: 90, glow: 'rgba(255,255,240,0.7)', glow2: 'rgba(255,255,240,0.08)', fill: '#fffbe8' } },
+  };
+
   class Camera {
     constructor() {
       this.mode = 'duel';            // 'duel' | 'side' | 'free'
@@ -133,9 +142,37 @@
 
     // ---- static scenery ----
     buildScene(stage) {
-      const rnd = seeded(stage.id === 'earth' ? 23 : 5);
+      const rnd = seeded(stage.id === 'earth' ? 23 : stage.id === 'moon' ? 31 : 5);
       const scene = { boxes: [], asteroids: [], stars: [], ridges: [] };
-      if (stage.gravity > 0) {
+      this.look = LOOKS[stage.id] || LOOKS.earth;
+      if (stage.id === 'moon') {
+        // Hard white sunlight, almost no ambient bounce: the lunar look.
+        this.lights = [{ dir: norm([0.6, 0.55, 0.6]), col: [1.0, 0.98, 0.94] }];
+        this.ambient = [0.16, 0.17, 0.2];
+        this.fogColor = [6, 7, 12];
+        for (let i = 0; i < 360; i++) {
+          const u = rnd(), t = rnd() * Math.PI * 2, r = Math.sqrt(1 - u * u);
+          scene.stars.push({ p: [r * Math.cos(t) * 6000, 300 + u * 5000, r * Math.sin(t) * 6000 - 2000], b: 0.4 + rnd() * 0.6, big: rnd() < 0.1 });
+        }
+        // Base modules (domes as stepped boxes), a comms mast and scattered boulders behind the fight line.
+        for (const [x, z, rad] of [[-620, -520, 90], [-180, -760, 70], [520, -600, 110], [900, -900, 80]]) {
+          for (let k = 0; k < 4; k++) {
+            const f = Math.cos((k / 4) * Math.PI / 2), h = rad * 0.25;
+            scene.boxes.push({ p: [x, h * (k + 0.5), z], s: [rad * 2 * f, h, rad * 2 * f], c: k === 3 ? '#8f949e' : '#767b86' });
+          }
+          scene.boxes.push({ p: [x, 14, z + rad + 6], s: [26, 28, 14], c: '#c9b48a' });
+        }
+        scene.boxes.push({ p: [260, 160, -700], s: [8, 320, 8], c: '#9aa0aa' }, { p: [260, 320, -700], s: [70, 6, 6], c: '#9aa0aa' });
+        for (let i = 0; i < 12; i++) {
+          const sz = 10 + rnd() * 34;
+          scene.boxes.push({ p: [-900 + rnd() * 1800, sz * 0.35, -120 - rnd() * 460], s: [sz * 1.4, sz * 0.7, sz], c: '#6d717a', ry: rnd() * 1.5, rx: rnd() * 0.2 });
+        }
+        for (const [z, base, amp, col] of [[-2600, 20, 180, '#2c2f36'], [-1800, 10, 90, '#3b3e46']]) {
+          const pts = [];
+          for (let x = -7000; x <= 7000; x += 300) pts.push([x, base + Math.abs(Math.sin(x * 0.0013)) * amp + rnd() * 20, z]);
+          scene.ridges.push({ pts, col });
+        }
+      } else if (stage.gravity > 0) {
         this.lights = [{ dir: norm([-0.5, 0.8, 0.55]), col: [0.80, 0.70, 0.56] }];
         this.ambient = [0.40, 0.42, 0.50];
         this.fogColor = [168, 128, 108];
@@ -357,7 +394,7 @@
       ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
       if (this.shake > 0.5 && !opts.paused) ctx.translate((Math.random() - 0.5) * this.shake, (Math.random() - 0.5) * this.shake);
 
-      if (this.stage.gravity > 0) this.drawEarthBackdrop(world); else this.drawSpaceBackdrop(world);
+      if (this.stage.gravity > 0) this.drawGroundBackdrop(world); else this.drawSpaceBackdrop(world);
 
       for (const b of this.scene.boxes) this.addBox(b, null, [0, 0, 0], { fogged: true });
       for (const a of this.scene.asteroids) this.addBox(a, null, [0, 0, 0], { fogged: true });
@@ -403,21 +440,44 @@
       return p ? p.y : H * 0.4;
     }
 
-    drawEarthBackdrop() {
-      const ctx = this.ctx, cam = this.cam;
+    drawGroundBackdrop() {
+      const ctx = this.ctx, cam = this.cam, L = this.look;
       const hy = this.horizonY();
       const sky = ctx.createLinearGradient(0, -20, 0, hy);
-      sky.addColorStop(0, '#0b1a33'); sky.addColorStop(0.55, '#2f5f8f'); sky.addColorStop(1, '#d99a5e');
+      sky.addColorStop(0, L.sky[0]); sky.addColorStop(0.55, L.sky[1]); sky.addColorStop(1, L.sky[2]);
       ctx.fillStyle = sky;
       ctx.fillRect(-20, -20, W + 40, Math.max(hy, 0) + 22);
 
-      const sun = cam.project([1700, 110, -3900]);
+      if (L.stars) {
+        for (const st of this.scene.stars) {
+          const c = cam.project(st.p);
+          if (!c || c.y > hy) continue;
+          ctx.fillStyle = `rgba(220,226,255,${st.b})`;
+          const sz = st.big ? 2.4 : 1.2;
+          ctx.fillRect(c.x, c.y, sz, sz);
+        }
+      }
+      if (L.planet) {
+        // The Earth seen from the Moon, half in shadow.
+        const c = cam.project(L.planet.p);
+        if (c) {
+          const r = L.planet.r * c.s;
+          const halo = ctx.createRadialGradient(c.x, c.y, r * 0.9, c.x, c.y, r * 1.5);
+          halo.addColorStop(0, 'rgba(110,180,255,0.35)'); halo.addColorStop(1, 'rgba(110,180,255,0)');
+          ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(c.x, c.y, r * 1.5, 0, Math.PI * 2); ctx.fill();
+          const body = ctx.createRadialGradient(c.x - r * 0.35, c.y - r * 0.4, r * 0.1, c.x, c.y, r);
+          body.addColorStop(0, '#7cc4f0'); body.addColorStop(0.6, '#2c6fae'); body.addColorStop(1, '#0d2a4d');
+          ctx.fillStyle = body; ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = 'rgba(3,4,9,0.6)'; ctx.beginPath(); ctx.arc(c.x - r * 0.4, c.y + r * 0.15, r, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      const sun = cam.project(L.sun.p);
       if (sun) {
-        const r = 300 * sun.s;
+        const r = L.sun.r * sun.s;
         const g = ctx.createRadialGradient(sun.x, sun.y, r * 0.5, sun.x, sun.y, r * 3);
-        g.addColorStop(0, 'rgba(255,190,110,0.9)'); g.addColorStop(0.4, 'rgba(255,150,80,0.25)'); g.addColorStop(1, 'rgba(255,150,80,0)');
+        g.addColorStop(0, L.sun.glow); g.addColorStop(0.4, L.sun.glow2); g.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.fillStyle = g; ctx.fillRect(sun.x - r * 3, sun.y - r * 3, r * 6, r * 6);
-        ctx.fillStyle = '#ffd9a0'; ctx.beginPath(); ctx.arc(sun.x, sun.y, r, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = L.sun.fill; ctx.beginPath(); ctx.arc(sun.x, sun.y, r, 0, Math.PI * 2); ctx.fill();
       }
 
       for (const ridge of this.scene.ridges) {
@@ -444,7 +504,7 @@
         ctx.closePath();
         ctx.clip();
         const g = ctx.createLinearGradient(0, hy, 0, H + 20);
-        g.addColorStop(0, '#8a7a66'); g.addColorStop(0.25, '#4a3f2c'); g.addColorStop(1, '#1e1810');
+        g.addColorStop(0, L.ground[0]); g.addColorStop(0.25, L.ground[1]); g.addColorStop(1, L.ground[2]);
         ctx.fillStyle = g;
         ctx.fillRect(-20, hy - 2, W + 40, H - hy + 40);
         ctx.restore();
@@ -455,18 +515,18 @@
       for (let x = -2000; x <= 2000; x += 100) {
         const s = cam.segment([x, 0.3, -3200], [x, 0.3, nearZ]);
         if (!s) continue;
-        ctx.strokeStyle = 'rgba(200,170,120,0.16)';
+        ctx.strokeStyle = `rgba(${L.grid},0.16)`;
         ctx.beginPath(); ctx.moveTo(s.ax, s.ay); ctx.lineTo(s.bx, s.by); ctx.stroke();
       }
       for (let z = -3200; z <= nearZ; z += 100) {
         const s = cam.segment([-2000, 0.3, z], [2000, 0.3, z]);
         if (!s) continue;
-        ctx.strokeStyle = `rgba(200,170,120,${(0.2 * clamp(1 - s.z / 3200, 0, 1)).toFixed(3)})`;
+        ctx.strokeStyle = `rgba(${L.grid},${(0.2 * clamp(1 - s.z / 3200, 0, 1)).toFixed(3)})`;
         ctx.beginPath(); ctx.moveTo(s.ax, s.ay); ctx.lineTo(s.bx, s.by); ctx.stroke();
       }
       // Fight line: where the duel actually happens.
       const fl = cam.segment([-CX, 0.6, 0], [CX, 0.6, 0]);
-      if (fl) { ctx.strokeStyle = 'rgba(255,200,140,0.35)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(fl.ax, fl.ay); ctx.lineTo(fl.bx, fl.by); ctx.stroke(); }
+      if (fl) { ctx.strokeStyle = L.line; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(fl.ax, fl.ay); ctx.lineTo(fl.bx, fl.by); ctx.stroke(); }
     }
 
     drawSpaceBackdrop() {

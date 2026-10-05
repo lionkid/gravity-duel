@@ -69,7 +69,7 @@
 
   function spawnProjectile(world, f, w, angleDeg) {
     const rad = angleDeg * Math.PI / 180;
-    const jitter = w.spread ? (Math.random() - 0.5) * 2 * w.spread * Math.PI / 180 : 0;
+    const jitter = w.spread ? (world.rnd() - 0.5) * 2 * w.spread * Math.PI / 180 : 0;
     const a = rad + jitter;
     const muzzle = w.muzzle || [C.muzzleX, C.muzzleY];
     const p = {
@@ -80,7 +80,16 @@
       prevX: 0, prevY: 0,
     };
     p.prevX = p.x; p.prevY = p.y;
+    p.x0 = p.x; p.y0 = p.y;
+    p.id = world.nextShotId = (world.nextShotId || 0) + 1;   // stable id so LAN guests can interpolate shots
     world.projectiles.push(p);
+    // Recoil: nothing to brace against in low or zero gravity, so the shot pushes the shooter back.
+    const rf = world.stage.recoil ? (f.onGround ? world.stage.recoil.ground : world.stage.recoil.air) : 0;
+    if (w.recoil && rf > 0) {
+      f.vx -= Math.cos(a) * f.facing * w.recoil * rf;
+      f.vy -= Math.sin(a) * w.recoil * rf;
+      if (f.onGround && f.vy < 0) f.onGround = false;
+    }
     emit(world, 'fire', { player: f.player, weapon: w.id, x: p.x, y: p.y, dx: Math.cos(a) * f.facing, dy: Math.sin(a) });
     return p;
   }
@@ -135,7 +144,10 @@
   function trySwitch(world, f, inp) {
     // A press is denied (HUD flash) only when it is clearly early; one made in the last
     // moments of the cooldown waits in the buffer and goes through when the cooldown ends.
-    if (inp.pressed.switch && f.switchCd > GD.TUNING.inputBuffer) f.switchDenied = 0.35;
+    if (inp.pressed.switch && f.switchCd > GD.TUNING.inputBuffer) {
+      f.switchDenied = 0.35;
+      emit(world, 'deny', { player: f.player, x: f.x, y: f.y });
+    }
     if (f.swBuf <= 0 || f.switchCd > 0 || f.melee || f.hitstun > 0 || f.ko) return;
     f.swBuf = 0;
     f.mode = f.mode === 'melee' ? 'ranged' : 'melee';
@@ -144,7 +156,7 @@
     emit(world, 'switch', { player: f.player, weapon: GD.activeWeapon(f).id, x: f.x, y: f.y });
   }
 
-  function updateResources(f, dt) {
+  function updateResources(world, f, dt) {
     f.cooldown = Math.max(0, f.cooldown - dt);
     f.subCooldown = Math.max(0, f.subCooldown - dt);
     f.subFlash = Math.max(0, f.subFlash - dt);
@@ -156,7 +168,8 @@
     f.lowEnergy = Math.max(0, f.lowEnergy - dt);
     f.recoil = Math.max(0, f.recoil - dt * 6);
     f.sinceFire += dt;
-    f.energy = Math.min(f.stats.energyMax, f.energy + f.stats.energyRegen * dt);
+    const regen = f.stats.energyRegen * (world.stage.vacuum ? C.vacuumEnergyRegen : 1);
+    f.energy = Math.min(f.stats.energyMax, f.energy + regen * dt);
 
     // Magazines refill slowly once both triggers have been released for a while.
     if (f.sinceFire >= C.reloadDelay) {
@@ -188,7 +201,8 @@
     if (target.ko || target.invuln > 0) return false;
     const fromFront = Math.sign(spec.dx || (spec.x - target.x)) === -target.facing;
     const blocked = target.guarding && fromFront;
-    let dmg = spec.dmg * target.stats.damageTaken;
+    const armorCut = 1 - target.stats.damageTaken;
+    let dmg = spec.dmg * (spec.light ? Math.max(0.2, 1 - armorCut * C.lightArmorMul) : target.stats.damageTaken);
     let knock = spec.knock;
     let stun = spec.stun;
     if (blocked) {
@@ -215,7 +229,9 @@
       target.vx += nx * knock * C.spaceKnockMul;
       target.vy += ny * knock * C.spaceKnockMul;
     }
-    if (!blocked) {
+    // Super armor (heat axe): a swing in progress takes the damage but is not interrupted.
+    const armored = target.melee && target.melee.w.superArmor;
+    if (!blocked && !armored) {
       target.hitstun = Math.max(target.hitstun, stun);
       target.guarding = false;
       target.melee = null;
@@ -240,7 +256,11 @@
   function explode(world, p, direct) {
     const w = p.weapon;
     p.dead = true;
-    emit(world, 'explode', { x: p.x, y: p.y, r: w.blast, weapon: w.id });
+    // No air, no shockwave: blasts shrink in vacuum.
+    const vac = world.stage.vacuum;
+    const radius = w.blast * (vac ? C.vacuumBlast : 1);
+    const blastDmg = w.blastDmg * (vac ? C.vacuumBlastDmg : 1);
+    emit(world, 'explode', { x: p.x, y: p.y, r: radius, weapon: w.id });
     const owner = world.fighters[p.owner - 1];
     for (const f of world.fighters) {
       if (f === direct) {
@@ -252,11 +272,11 @@
       const cx = Math.max(b.x0, Math.min(p.x, b.x1));
       const cy = Math.max(b.y0, Math.min(p.y, b.y1));
       const d = Math.hypot(cx - p.x, cy - p.y);
-      if (d > w.blast) continue;
-      const falloff = 1 - 0.5 * (d / w.blast);
+      if (d > radius) continue;
+      const falloff = 1 - 0.5 * (d / radius);
       let dx = f.x - p.x, dy = (f.y - f.h / 2) - p.y;
       if (!dx && !dy) { dx = p.vx || f.facing; dy = -0.2; }
-      GD.applyHit(world, f, owner, { dmg: w.blastDmg * falloff, knock: w.knock * falloff, stun: w.stun, x: cx, y: cy, dx, dy });
+      GD.applyHit(world, f, owner, { dmg: blastDmg * falloff, knock: w.knock * falloff, stun: w.stun, x: cx, y: cy, dx, dy });
     }
   }
 
@@ -277,7 +297,13 @@
         if (!pointInBox(p.x, p.y, hitbox(f), p.r)) continue;
         if (w.blast) { explode(world, p, f); break; }
         const owner = world.fighters[p.owner - 1];
-        GD.applyHit(world, f, owner, { dmg: w.dmg, knock: w.knock, stun: w.stun, x: p.x, y: p.y, dx: p.vx, dy: p.vy });
+        let dmg = w.dmg;
+        if (w.falloff && !world.stage.vacuum) {
+          // Air scatters the beam: damage drops with the distance travelled.
+          const dist = Math.hypot(p.x - p.x0, p.y - p.y0);
+          dmg *= 1 - w.falloff * Math.min(1, dist / C.beamFalloffRange);
+        }
+        GD.applyHit(world, f, owner, { dmg, knock: w.knock, stun: w.stun, light: w.light, x: p.x, y: p.y, dx: p.vx, dy: p.vy });
         p.dead = true;
         break;
       }
@@ -332,8 +358,8 @@
   GD.meleeBox = function (f, m) {
     const near = f.x + f.facing * 8, far = f.x + f.facing * (8 + m.range);
     const style = m.w.style;
-    const y0 = style === 'lance' ? f.y - 74 : style === 'axe' ? f.y - f.h - 26 : f.y - f.h - 10;
-    const y1 = style === 'lance' ? f.y - 26 : f.y + 4;
+    const y0 = style === 'lance' ? f.y - 84 : style === 'axe' ? f.y - f.h - 26 : f.y - f.h - 10;
+    const y1 = style === 'lance' ? f.y - 14 : f.y + 4;
     return { x0: Math.min(near, far), x1: Math.max(near, far), y0, y1 };
   };
 
@@ -361,7 +387,7 @@
   GD.stepCombat = function (world, inputs, dt) {
     for (const f of world.fighters) {
       const inp = (f.hitstun > 0 || f.ko) ? GD.IDLE_INPUT : inputs[f.player - 1];
-      updateResources(f, dt);
+      updateResources(world, f, dt);
       trySwitch(world, f, inp);
       tryAttack(world, f, inp);
       trySub(world, f, inp);
