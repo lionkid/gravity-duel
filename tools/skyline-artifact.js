@@ -12,9 +12,14 @@ const src = fs.readFileSync(path.join(root, 'games', 'skyline', 'index.html'), '
 let head = src.slice(src.indexOf('<head>') + 6, src.indexOf('</head>'));
 const body = src.slice(src.indexOf('<body>') + 6, src.indexOf('</body>'));
 head = head.replace(/<meta charset[^>]*>\s*/, '').replace(/<meta name="viewport"[^>]*>\s*/, '').replace(/<link rel="icon"[^>]*>\s*/, '');
+// Import map values must be URLs: "./vendor/..." works, a bare "vendor/..." is silently ignored.
 const page = (head.trim() + '\n' + body.trim() + '\n')
-  .replace(/\.\.\/\.\.\//g, '')
-  .replace('src="./main.js"', 'src="games/skyline/main.js"');
+  .replace(/\.\.\/\.\.\//g, './')
+  .replace('src="./main.js"', 'src="./games/skyline/main.js"');
+const importMap = JSON.parse(page.match(/<script type="importmap">\s*([\s\S]*?)<\/script>/)[1]);
+for (const [k, v] of Object.entries(importMap.imports)) {
+  if (!/^(\.\/|\.\.\/|\/|https?:)/.test(v)) throw new Error(`import map entry ${k} → ${v} is not a URL`);
+}
 fs.mkdirSync(path.dirname(out), { recursive: true });
 fs.writeFileSync(out, page);
 
