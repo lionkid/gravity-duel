@@ -154,6 +154,63 @@ function stepFighter(world, f, it, dt, g) {
   }
 }
 
+// ---------------------------------------------------------------- copies and snapshots
+// A World is plain data apart from the stage and the statics index (immutable, shared by reference)
+// and the random generator (restored from its state). Copies let a LAN guest predict ahead of the
+// host; snapshots travel over the wire as JSON.
+const SHARED = new Set(['stage', 'statics', 'rnd', 'events']);
+
+export function cloneWorld(world) {
+  const copy = {};
+  for (const k of Object.keys(world)) if (!SHARED.has(k)) copy[k] = structuredClone(world[k]);
+  copy.stage = world.stage;
+  copy.statics = world.statics;
+  copy.events = [];
+  copy.rnd = makeRng(world.seed);
+  copy.rnd.state = world.rnd.state;
+  return copy;
+}
+
+export function serializeWorld(world) {
+  const snap = {};
+  for (const k of Object.keys(world)) if (!SHARED.has(k)) snap[k] = structuredClone(world[k]);
+  snap.rng = world.rnd.state;
+  return snap;
+}
+
+// Overwrites a world with a snapshot of the same match. Fighter objects keep their identity.
+export function applySnapshot(world, snap) {
+  for (const k of Object.keys(snap)) {
+    if (k === 'rng' || k === 'fighters') continue;
+    world[k] = structuredClone(snap[k]);
+  }
+  snap.fighters.forEach((s, i) => {
+    if (world.fighters[i]) Object.assign(world.fighters[i], structuredClone(s));
+    else world.fighters[i] = structuredClone(s);
+  });
+  world.fighters.length = snap.fighters.length;
+  world.rnd.state = snap.rng;
+  world.events = [];
+  return world;
+}
+
+// A cheap checksum of the state that matters, to count desyncs between two copies of a match.
+export function hashWorld(world) {
+  let h = 2166136261;
+  const mix = (v) => {
+    const n = typeof v === 'number' ? Math.round(v * 1000) | 0 : v === true ? 1 : v === false || v == null ? 0 : 7;
+    h = Math.imul(h ^ n, 16777619);
+  };
+  for (const f of world.fighters) {
+    mix(f.pos.x); mix(f.pos.y); mix(f.pos.z); mix(f.vel.x); mix(f.vel.y); mix(f.vel.z); mix(f.yaw);
+    mix(f.hp); mix(f.fuel); mix(f.energy); mix(f.heat); mix(f.stun); mix(f.lock); mix(f.dead); mix(f.onGround);
+    mix(f.active === 'melee' ? 1 : f.active === 'vulcan' ? 2 : 3); mix(f.melee ? f.melee.t : -1);
+  }
+  for (const p of world.projectiles) { mix(p.id); mix(p.pos.x); mix(p.pos.y); mix(p.pos.z); }
+  mix(world.tick); mix(world.winner); mix(world.rnd.state);
+  return h >>> 0;
+}
+
 // Plain-data view of a fighter for snapshots and tests (no functions, no derived caches).
 export function fighterState(f) {
   return {

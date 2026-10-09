@@ -21,14 +21,17 @@ import { createBlobShadow, createSparks, createSlashes, createProjectileView, cr
 import { createPost } from '../../engine/render/post.js';
 import { createSynth } from '../../engine/audio/synth.js';
 import { createScreens } from '../../engine/ui/screens.js';
+import { createSocket } from '../../engine/net/socket.js';
+import { createHostSync, createGuestSync } from '../../engine/net/sync.js';
 import * as CFG from './config.js';
 import { generateCity } from './stages/city.js';
-import { createWorld, stepWorld } from './rules/world.js';
+import { createWorld, stepWorld, cloneWorld, serializeWorld, applySnapshot, hashWorld } from './rules/world.js';
 import { weaponIn, meleeOf, rangedOf } from './rules/combat.js';
 import { AX01, withPalette } from './mechs/ax01.js';
 import { createAI, aiIntent, AI_LEVELS } from './ai/brain.js';
 import { RECIPES, soundForEvent, updateThrusterLoops } from './sound.js';
 import { defineScreens } from './screens.js';
+import { createLobby } from './lobby.js';
 
 const params = new URLSearchParams(location.search);
 const seed = Number(params.get('seed')) || 7;
@@ -107,7 +110,7 @@ const cam = createCameraBlender(app.camera, { time: CFG.CAMERA.blend });
 const hud = document.getElementById('hud');
 const top = el('div', 'top', hud);
 const meBox = el('div', 'me', top);
-el('div', 'name', meBox, 'AX-01 VANGUARD');
+const meName = el('div', 'name', meBox, 'AX-01 VANGUARD');
 const meLoadout = el('div', 'loadout', meBox);
 const hpBar = createBar(meBox, 'HP', 'hp');
 const gauges = el('div', 'gauges', hud);
@@ -135,6 +138,7 @@ const msg = el('div', 'msg', hud);
 const ko = el('div', 'ko', hud);
 const koResult = el('div', 'result', ko);
 const debug = el('div', 'debug', hud);
+const netBox = el('div', 'net', hud);
 const dmgNums = Array.from({ length: 12 }, () => el('div', 'dmgnum', hud));
 let dmgNext = 0;
 function showDamage(x, y, amount, heavy, mine) {
@@ -153,14 +157,21 @@ const showMsg = (text, t = 1.2) => { msg.textContent = text; msg.classList.add('
 // ---------------------------------------------------------------- battle state
 let world, me, enemy, prev, lastSeen = null, ai = null;
 let inBattle = false, playing = false, koT = 0, pauseGraceT = 0, attractT = 0;
+// Who runs the match: 'local' (the computer opponent), 'host' (seat 1 of a LAN room, authoritative)
+// or 'guest' (seat 2: predicts ahead of the host's confirmed ticks). mySeat is the fighter I control.
+let session = { kind: 'local', sync: null };
+let mySeat = 1;
+let lastView = null;                         // the guest's previously rendered predicted world
+const hostHashes = new Map();                // host, ?debug only: tick → state hash, for the LAN smoke test
 // A fresh world with both mechs at their spawns; also what stands behind the title screen.
-function setupWorld() {
-  world = createWorld({ stage, seed, loadouts: { 1: loadout, 2: cpuLoadout } });
-  me = world.fighters[0]; enemy = world.fighters[1];
+function setupWorld({ matchSeed = seed, loadouts = { 1: loadout, 2: cpuLoadout } } = {}) {
+  world = createWorld({ stage, seed: matchSeed, loadouts });
+  me = world.fighters[mySeat - 1]; enemy = world.fighters[2 - mySeat];
   ai = createAI(settings.cpu, seed * 7 + 3);
+  lastView = null;
   // Development: ?pos=x,y,z and ?look=yaw,pitch place the player and the camera for screenshots.
   if (params.get('pos')) { const [x, y, z] = params.get('pos').split(',').map(Number); Object.assign(me.pos, { x, y, z }); me.onGround = false; }
-  look.yaw = stage.spawns[0].yaw; look.pitch = CFG.CAMERA.pitchDefault;
+  look.yaw = stage.spawns[mySeat - 1].yaw; look.pitch = CFG.CAMERA.pitchDefault;
   if (params.get('look')) { const [yaw, pitch] = params.get('look').split(',').map(Number); look.yaw = yaw; look.pitch = pitch; }
   prev = world.fighters.map((f) => ({ x: f.pos.x, y: f.pos.y, z: f.pos.z, yaw: f.yaw }));
   world.fighters.forEach((f, i) => {
@@ -175,8 +186,9 @@ function setupWorld() {
   hitstopT = 0; koT = 0;
   lastSeen = null;
   ko.classList.remove('on');
-  meLoadout.textContent = loadoutText(loadout);
-  enemyName.textContent = `對手 · ${loadoutText(cpuLoadout)} · ${AI_LEVELS[settings.cpu].zh}`;
+  meName.textContent = mySeat === 1 ? 'AX-01 VANGUARD' : 'AX-01 VANGUARD · CRIMSON';
+  meLoadout.textContent = loadoutText(me.loadout);
+  enemyName.textContent = session.kind === 'local' ? `對手 · ${loadoutText(enemy.loadout)} · ${AI_LEVELS[settings.cpu].zh}` : `對手 · ${loadoutText(enemy.loadout)} · 區網`;
   slotEls.forEach((s, i) => { s.querySelector('.wname').textContent = weaponIn(me, CFG.SLOTS[i]).zh; });
   tpRig.reset(); lockRig.reset();
   cam.use(tpRig);
@@ -219,13 +231,32 @@ function setPlaying(on) {
   keyboard.release();
   if (on) pauseGraceT = 0.3;             // the key that closed a menu must not pause again
 }
+// Solo: the computer plays seat 2.
 function startBattle() {
+  session = { kind: 'local', sync: null };
+  mySeat = 1;
   setupWorld();
+  beginBattle();
+}
+// LAN: both browsers build the same world from the host's seed and loadouts; seat 1 runs it.
+function startLan({ seed: matchSeed, loadouts, seat }) {
+  mySeat = seat;
+  session = { kind: seat === 1 ? 'host' : 'guest', sync: null };
+  setupWorld({ matchSeed, loadouts });
+  const send = (m) => socket.send(m);
+  session.sync = seat === 1
+    ? createHostSync({ world, stepWorld, serializeWorld, send })
+    : createGuestSync({ world, stepWorld, cloneWorld, applySnapshot, send, now: () => performance.now() });
+  hostHashes.clear();
+  beginBattle();
+}
+function beginBattle() {
   inBattle = true;
   ui.hide();
   setPlaying(true);
   mouse.requestLock();
 }
+// The menu over a running match. Solo matches stop; a LAN match goes on without this player's input.
 function pause() {
   if (!inBattle || !playing || world.winner) return;
   setPlaying(false);
@@ -238,23 +269,51 @@ function resume() {
   setPlaying(true);
   mouse.requestLock();
 }
-function quit() {
+// Leaves the match. stay = true keeps the LAN room (the caller shows the room screen).
+function quit(stay = false) {
   inBattle = false;
+  session = { kind: 'local', sync: null };
+  mySeat = 1;
   setPlaying(false);
   mouse.exitLock();
   setupWorld();
   ui.hide();
-  ui.show('title');
+  if (!stay) ui.show('title');
+}
+function onRematch() {
+  if (session.kind === 'local') startBattle();
+  else lobby.again();
 }
 function showKo() {
   const win = world.winner === me.id;
   const left = Math.max(0, Math.round(win ? me.hp : enemy.hp));
-  const text = `${win ? '擊破' : '敗給'} ${loadoutText(cpuLoadout)}（${AI_LEVELS[settings.cpu].zh}）· ${world.time.toFixed(0)} 秒 · 勝方剩餘 HP ${left}`;
+  const foe = session.kind === 'local' ? `${loadoutText(enemy.loadout)}（${AI_LEVELS[settings.cpu].zh}）` : `${loadoutText(enemy.loadout)}（區網對手）`;
+  const text = `${win ? '擊破' : '敗給'} ${foe} · ${world.time.toFixed(0)} 秒 · 勝方剩餘 HP ${left}`;
   setPlaying(false);
   mouse.exitLock();
   ko.classList.remove('on');
   ui.show('ko', { win, text });
 }
+// LAN plumbing: the relay socket feeds the active sync first, then the lobby protocol.
+const socket = createSocket({ onMessage: (m) => { if (session.sync && session.sync.receive(m)) return; lobby.receive(m); } });
+// Lobby changes redraw the menu that shows them; the room browser only when its list really changed,
+// so a two-second poll does not keep rebuilding the buttons under the player's hand.
+let lanShown = '';
+const lobby = createLobby({
+  socket, loadout,
+  onChange: (st) => {
+    if (ui.name === 'lan') {
+      const sig = JSON.stringify([st.rooms, st.self, st.note, st.scanned, st.server]);
+      if (sig === lanShown) return;
+      lanShown = sig;
+      ui.refresh();
+    } else if (['title', 'room', 'ko', 'pause', 'lanlost'].includes(ui.name)) ui.refresh();
+  },
+  onStart: startLan,
+  onPeerLeft: () => { if (inBattle) { quit(true); ui.show('lanlost'); } },
+  onLobby: () => { if (inBattle) quit(true); ui.hide(); ui.show('room'); },
+});
+lobby.detectServer();
 const ui = createScreens(document.getElementById('screens'));
 const ctx = {
   loadout, cpuLoadout, settings, sfx, version: CFG.GAME.version,
@@ -262,6 +321,11 @@ const ctx = {
   set cpuLevel(v) { settings.cpu = pick(AI_LEVELS, v, 'normal'); },
   get note() { return mouse.state.supported ? '' : '這裡無法鎖定滑鼠：用方向鍵控制鏡頭與準星，Esc 暫停。'; },
   startBattle, resume, quit,
+  lan: lobby.state, lanDraft: '',
+  isLan: () => session.kind !== 'local',
+  lanBrowse: () => { lanShown = ''; lobby.browse(); }, lanConnect: (base) => lobby.connect(base), lanLeave: () => lobby.leave(),
+  lanReady: (on) => lobby.setReady(on), lanAgain: () => lobby.again(), lanLobby: () => lobby.goLobby(),
+  lanPickChanged: () => lobby.pickChanged(), lanLinks: () => socket.links(location.pathname),
   rerollCpu() { cpuRoll = (cpuRoll * 7 + 5) % 997; rollCpu(); },
   saveSettings() { save('skyline.settings', settings); save('skyline.loadout', loadout); },
   applySettings() {
@@ -361,14 +425,35 @@ const loop = createLoop({
     if (!playing) { look.yaw = yaw; look.pitch = pitch; }
     pauseGraceT -= dt;
     if (!inBattle) return;
-    if (intent.pressed.rematch && world.winner) { startBattle(); return; }
+    if (intent.pressed.rematch && world.winner) { onRematch(); return; }
     if (intent.pressed.pause && playing && pauseGraceT <= 0) { pause(); return; }
-    if (!playing && !world.winner) return;                                  // paused
+    const mine = playing ? intent : IDLE_INTENT;
+    if (session.kind === 'guest') { session.sync.step(mine); return; }      // predicted in render
+    if (session.kind === 'local' && !playing && !world.winner) return;      // paused (solo only)
     world.fighters.forEach((f, i) => { const p = prev[i]; p.x = f.pos.x; p.y = f.pos.y; p.z = f.pos.z; p.yaw = f.yaw; });
-    stepWorld(world, [playing ? intent : IDLE_INTENT, dummyMode ? dummyStep(dt) : aiIntent(ai, world, 2, dt)], dt);
+    if (session.kind === 'host') {
+      session.sync.step(mine);
+      if (showDebug) { hostHashes.set(world.tick, hashWorld(world)); if (hostHashes.size > 600) hostHashes.delete(hostHashes.keys().next().value); }
+    } else {
+      stepWorld(world, [mine, dummyMode ? dummyStep(dt) : aiIntent(ai, world, 2, dt)], dt);
+    }
     for (const e of drain(world)) { handleEvent(e); soundForEvent(sfx, e, world, me.id); }
   },
   render(alpha, frameDt) {
+    // LAN: the host sends this frame's ticks; the guest plays the confirmed events and rebuilds its view.
+    if (session.kind === 'host') session.sync.flush();
+    else if (session.kind === 'guest') {
+      session.sync.flush();
+      for (const e of session.sync.drainEvents()) { handleEvent(e); soundForEvent(sfx, e, world, mySeat); }
+      const view = session.sync.predict();
+      if (lastView && view.tick === lastView.tick + 1) {
+        lastView.fighters.forEach((f, i) => { const p = prev[i]; p.x = f.pos.x; p.y = f.pos.y; p.z = f.pos.z; p.yaw = f.yaw; });
+      } else if (!lastView || view.tick !== lastView.tick) {
+        view.fighters.forEach((f, i) => { const p = prev[i]; p.x = f.pos.x; p.y = f.pos.y; p.z = f.pos.z; p.yaw = f.yaw; });
+      }
+      lastView = view;
+      world = view; me = world.fighters[mySeat - 1]; enemy = world.fighters[2 - mySeat];
+    }
     if (koT > 0) { koT -= frameDt; if (koT <= 0) showKo(); }
     // Hit stop: on a solid melee hit the picture holds for a few frames while the simulation goes on.
     const frozen = hitstopT > 0;
@@ -410,20 +495,20 @@ const loop = createLoop({
 
     // Camera: a slow orbit over the city behind the menus; in play, first person while aiming, the
     // lock-on orbit while locked, free orbit otherwise.
-    const myPos = mechs[0].group.position, enemyPos = mechs[1].group.position;
+    const myPos = mechs[mySeat - 1].group.position, enemyPos = mechs[2 - mySeat].group.position;
     if (!inBattle) {
       attractT += frameDt;
       const a = attractT * 0.05;
       app.camera.position.set(Math.cos(a) * 300, 175 + Math.sin(attractT * 0.17) * 10, Math.sin(a) * 300);
       app.camera.lookAt(0, 30, 0);
       if (app.camera.fov !== CFG.CAMERA.tp.fov) { app.camera.fov = CFG.CAMERA.tp.fov; app.camera.updateProjectionMatrix(); }
-      mechs[0].group.visible = true;
+      mechs[0].group.visible = true; mechs[1].group.visible = true;
     } else {
       let rig = tpRig;
       if (me.aiming) { fpRig.fov = weaponIn(me, 'ranged').zoomFov; rig = fpRig; }
       else if (me.lock && !enemy.dead) rig = lockRig;
       cam.use(rig);
-      mechs[0].group.visible = !(me.aiming && !cam.blending);
+      mechs[mySeat - 1].group.visible = !(me.aiming && !cam.blending);
       cam.update(frameDt, myPos, look, world.statics, enemyPos);
       shake.apply(app.camera, frameDt);
     }
@@ -493,13 +578,22 @@ const loop = createLoop({
         `  ${me.active}${me.melee ? ' ' + me.melee.stage : ''}  lock ${me.lock}/${me.lockLos ? 'los' : 'hidden'}  hp ${me.hp}/${enemy.hp}` +
         `  look ${look.yaw.toFixed(2)} ${look.pitch.toFixed(2)}  mouse ${mouse.state.locked}`;
     } else if (debug.textContent) debug.textContent = '';
+    if (session.kind !== 'local') {
+      const st = session.sync.stats;
+      netBox.textContent = session.kind === 'host' ? `區網主機 · 對手輸入遲到 ${st.late}` : `區網 · 延遲 ${st.rtt.toFixed(0)} ms · 領先 ${st.lead} tick · 輸入延遲 ${st.delay} · 修正 ${st.corrections}`;
+    } else if (netBox.textContent) netBox.textContent = '';
   },
 });
 loop.start();
 
 // Hooks for tests and tooling.
 window.__skyline = {
-  get world() { return world; }, look, mouse, app, post, sfx, ui, settings, stage, loadout, cpuLoadout,
-  get playing() { return playing; }, get inBattle() { return inBattle; },
-  setPlaying, startBattle, pause, resume, quit, version: CFG.GAME.version,
+  get world() { return world; }, look, mouse, app, post, sfx, ui, settings, stage, loadout, cpuLoadout, socket, lobby,
+  get playing() { return playing; }, get inBattle() { return inBattle; }, get mySeat() { return mySeat; },
+  get net() {
+    if (session.kind === 'local') return { kind: 'local' };
+    const s = session.sync;
+    return { kind: session.kind, tick: world.tick, confirmedTick: s.world.tick, confirmedHash: hashWorld(s.world), stats: { ...s.stats }, hostHashes: Object.fromEntries(hostHashes) };
+  },
+  setPlaying, startBattle, pause, resume, quit, loop, version: CFG.GAME.version,
 };

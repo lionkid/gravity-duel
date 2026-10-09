@@ -121,7 +121,7 @@ const copy = (rel) => {
   fs.mkdirSync(path.dirname(to), { recursive: true });
   fs.cpSync(from, to, { recursive: true });
 };
-['index.html', 'src', 'server/lan-server.js', 'assets/icon.ico', 'assets/icon.png', 'README.md'].forEach(copy);
+['index.html', 'hub.html', 'src', 'engine', 'games', 'vendor', 'server/lan-server.js', 'assets/icon.ico', 'assets/icon.png', 'README.md'].forEach(copy);
 // GravityDuel.exe is built from Node.js, so its license travels with it.
 fs.copyFileSync(nodeLicense, path.join(stage, 'node-LICENSE.txt'));
 

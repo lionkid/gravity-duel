@@ -17,6 +17,8 @@ export function makeRng(seed) {
   rnd.chance = (p) => rnd() < p;
   // A new generator derived from this one, so sub-systems can draw numbers without disturbing each other.
   rnd.fork = () => makeRng(Math.floor(rnd() * 4294967296));
+  // The internal state, so a world copy or a snapshot continues the same sequence.
+  Object.defineProperty(rnd, 'state', { get: () => s, set: (v) => { s = v >>> 0; } });
   return rnd;
 }
 

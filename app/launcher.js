@@ -97,7 +97,7 @@ function openGame(url) {
   // Already running? Reuse it instead of starting a second server.
   for (let port = FIRST_PORT; port < FIRST_PORT + 20; port++) {
     if (await probe(port)) {
-      const url = `http://localhost:${port}/`;
+      const url = `http://localhost:${port}/hub.html`;
       console.log(`Gravity Duel 已經在執行，開啟 ${url}`);
       openGame(url);
       setTimeout(() => process.exit(0), 500);
@@ -114,14 +114,15 @@ function openGame(url) {
     process.exitCode = 1;
     return;
   }
-  const url = `http://localhost:${port}/`;
+  const url = `http://localhost:${port}/hub.html`;
   console.log('==============================================');
   console.log('  GRAVITY DUEL  遊戲伺服器執行中');
   console.log('==============================================');
   console.log(`  這台電腦：${url}`);
   for (const u of lan.lanAddresses(port)) console.log(`  區網位址：${u}`);
   console.log('');
-  console.log('  區域網路對戰：雙方都打開 Gravity Duel，選「區域網路對戰」。');
+  console.log('  入口頁列出兩款遊戲：原版 Gravity Duel 與 3D 的 Skyline。');
+  console.log('  區域網路對戰：雙方都打開同一款遊戲，選「區域網路對戰」。');
   console.log('  一台建立房間，另一台會在列表中自動看到它。');
   console.log('');
   if (idleExit) {

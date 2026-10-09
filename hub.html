@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gravity Duel</title>
+<meta name="description" content="Gravity Duel 遊戲入口：2D 原版與 3D 的 Skyline。">
+<link rel="icon" href="assets/icon.png">
+<link href="https://fonts.googleapis.com/css2?family=Russo+One&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #0a0d18; --fg: #e8ecf5; --muted: #8e97ad; --accent: #58e0ff; --gold: #d9b24c; --line: rgba(142, 151, 173, 0.25); --panel: rgba(16, 20, 34, 0.9); color-scheme: dark; }
+  html, body { margin: 0; min-height: 100%; background: radial-gradient(ellipse at top, #141a2e, var(--bg) 60%); color: var(--fg); font-family: 'Noto Sans TC', system-ui, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 48px 16px 40px; box-sizing: border-box; }
+  h1 { font: 40px 'Russo One', sans-serif; letter-spacing: 0.08em; margin: 0; }
+  h1 small { display: block; font: 14px 'Noto Sans TC', sans-serif; color: var(--muted); letter-spacing: 0.3em; margin-top: 6px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; margin-top: 32px; }
+  a.card { display: block; text-decoration: none; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px; transition: border-color 0.15s, transform 0.15s; }
+  a.card:hover, a.card:focus-visible { border-color: var(--accent); transform: translateY(-2px); outline: none; }
+  .card h2 { font: 22px 'Russo One', sans-serif; letter-spacing: 0.06em; margin: 0; }
+  .card h2 span { color: var(--accent); }
+  .card .tag { display: inline-block; margin-top: 8px; font-size: 12px; color: var(--gold); border: 1px solid rgba(217, 178, 76, 0.4); border-radius: 999px; padding: 2px 10px; }
+  .card p { color: var(--muted); font-size: 14px; line-height: 1.6; margin: 12px 0 0; }
+  .card .go { margin-top: 16px; color: var(--accent); font-weight: 500; }
+  .lan { margin-top: 32px; padding: 18px 22px; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); font-size: 14px; line-height: 1.7; }
+  .lan b { color: var(--fg); }
+  code { font-family: ui-monospace, monospace; color: var(--fg); }
+</style>
+</head>
+<body>
+<main>
+  <h1>GRAVITY DUEL<small>重力決定彈道的機甲對戰</small></h1>
+  <div class="cards">
+    <a class="card" href="./">
+      <h2>Gravity Duel</h2>
+      <span class="tag">2D · 原版</span>
+      <p>橫向捲軸的一對一：地球、月面、小行星三種重力，彈道隨之改變。單人、同一台電腦雙人、區域網路對戰。</p>
+      <div class="go">進入遊戲 →</div>
+    </a>
+    <a class="card" href="./games/skyline/">
+      <h2>Gravity Duel <span>Skyline</span></h2>
+      <span class="tag">3D · 第三人稱</span>
+      <p>在傍晚到入夜的城市裡打：街道、高架道路、大樓屋頂。火神砲、遠程第一人稱瞄準、近戰連段；電腦對手三段難度，或兩台電腦區域網路對戰。</p>
+      <div class="go">進入遊戲 →</div>
+    </a>
+  </div>
+  <div class="lan">
+    <b>區域網路對戰</b>：兩台電腦都打開 Gravity Duel（桌面版，或在專案資料夾執行 <code>npm run dev</code>），在同一款遊戲裡一台「建立房間」、另一台從列表加入。找不到房間時，把主機畫面上的位址（例如 <code>192.168.1.20:8080</code>）輸入到「輸入位址」欄。
+  </div>
+</main>
+</body>
+</html>

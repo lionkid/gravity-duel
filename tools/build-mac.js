@@ -55,7 +55,7 @@ const res = path.join(contents, 'Resources');
 const game = path.join(res, 'game');
 const copy = (from, to) => fs.cpSync(path.join(root, from), path.join(to, from), { recursive: true });
 for (const d of [path.join(contents, 'MacOS'), game]) fs.mkdirSync(d, { recursive: true });
-for (const f of ['index.html', 'src', 'server/lan-server.js', 'app/launcher.js', 'README.md']) copy(f, game);
+for (const f of ['index.html', 'hub.html', 'src', 'engine', 'games', 'vendor', 'assets/icon.png', 'server/lan-server.js', 'app/launcher.js', 'README.md']) copy(f, game);
 fs.copyFileSync(path.join(root, 'assets', 'icon.icns'), path.join(res, 'icon.icns'));
 for (const arch of ARCHES) {
   fs.mkdirSync(path.join(res, 'node', arch), { recursive: true });

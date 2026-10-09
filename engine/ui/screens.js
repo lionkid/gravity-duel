@@ -60,14 +60,30 @@ export function createScreens(root, { onChange } = {}) {
     const def = defs.get(top.name);
     if (!def) throw new Error(`screen ${top.name} is not defined`);
     const view = def(top.data || {});
+    // A refresh keeps the focus (and a text box's caret) where it was.
+    const active = document.activeElement;
+    const keep = active && root.contains(active) ? {
+      id: active.id, act: active.dataset.act, key: active.dataset.url ?? active.dataset.id ?? active.dataset.level ?? '',
+      text: active.tagName === 'INPUT' && active.type === 'text', start: active.selectionStart, end: active.selectionEnd,
+    } : null;
     current = { name: top.name, actions: view.actions || {}, view };
     root.hidden = false;
     root.innerHTML = view.html;
     root.dataset.screen = top.name;
     if (view.mount) view.mount(root);
-    // Focus the main button so Enter works at once.
-    const first = root.querySelector('.primary:not([disabled]), .on:not([disabled])') || root.querySelector('button:not([disabled])');
-    if (first) first.focus({ preventScroll: true });
+    let focus = null;
+    if (keep) {
+      if (keep.id) focus = root.querySelector(`#${CSS.escape(keep.id)}`);
+      else if (keep.act) focus = [...root.querySelectorAll(`[data-act="${keep.act}"]`)].find((el) => (el.dataset.url ?? el.dataset.id ?? el.dataset.level ?? '') === keep.key) || null;
+    }
+    if (focus) {
+      focus.focus({ preventScroll: true });
+      if (keep.text && focus.setSelectionRange && keep.start != null) try { focus.setSelectionRange(keep.start, keep.end); } catch (e) { /* not a text box */ }
+    } else {
+      // Focus the main button so Enter works at once.
+      const first = root.querySelector('.primary:not([disabled]), .on:not([disabled])') || root.querySelector('button:not([disabled])');
+      if (first) first.focus({ preventScroll: true });
+    }
     if (onChange) onChange(top.name);
   }
 
