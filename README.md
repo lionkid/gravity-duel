@@ -142,6 +142,16 @@ Windows、Mac 與 Node.js 版都可以互相看到房間並對戰。每台電腦
 
 所有音效都由 Web Audio 即時合成，不需要音效檔，並依機體位置左右聲道定位。瀏覽器規定要先按一個鍵或點一下才會出聲。標題或暫停選單可以開關，也可以按 `M`。
 
+## Skyline（3D 版，`skyline` 分支開發中）
+
+同一個世界觀的第三人稱 3D 機甲對戰：夜晚的城市、可以跳上的大樓、繞內城一圈的高架道路。設計文件在 `docs/skyline-architecture.md`。
+
+- 執行：`npm run dev`，瀏覽器開 `http://localhost:8080/games/skyline/`（3D 版用 ES modules，必須透過伺服器開啟，不能直接雙擊）。
+- 操作：WASD 移動、滑鼠或方向鍵轉鏡頭、Space 跳躍（按住噴射）、Shift/L 衝刺、按住右鍵/K 進第一人稱瞄準、F3 除錯資訊。
+- 測試：`npm run test:skyline`（Node 內建 test runner）。`node tools/skyline-smoke.mjs` 會在 headless Chromium 裡跑一遍並存截圖。
+- 結構：`engine/` 是可重用的 3D 引擎層（迴圈、輸入、碰撞、鏡頭、繪圖、HUD），`games/skyline/` 是這款遊戲的規則、場景、機體與選單；`vendor/three/` 是固定版本的 Three.js（`npm run vendor` 重新產生）。
+- 進度：M0 骨架、M1 城市與移動完成；接下來是 M2 武器與戰鬥。
+
 ## 專案結構
 
 - `src/config.js`：機體、武器、場景、手感參數、按鍵配置。調平衡只改這裡。

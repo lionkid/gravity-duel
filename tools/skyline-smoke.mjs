@@ -55,6 +55,18 @@ await page.keyboard.up('KeyK');
 await page.waitForTimeout(2500);
 await shot('05-landed');
 console.log('  at the end:', await state());
+// Postcard views: the north ramp and deck from the street, and the skyline from above.
+for (const [name, q] of [['06-highway', 'pos=0,0,40&look=3.14159,-0.05'], ['07-skyline', 'pos=-60,180,120&look=0.6,-0.55']]) {
+  const p2 = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  p2.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+  await p2.goto(`http://127.0.0.1:${port}/games/skyline/?seed=7&${q}`);
+  await p2.waitForFunction(() => window.__skyline && window.__skyline.world.tick > 3, null, { timeout: 30000 });
+  await p2.evaluate(() => window.__skyline.setPlaying(true));
+  await p2.waitForTimeout(400);
+  await p2.screenshot({ path: path.join(outDir, `${name}.png`) });
+  console.log(`  saved ${name}.png`);
+  await p2.close();
+}
 const fps = await page.evaluate(() => document.querySelector('#hud .debug').textContent.split(' fps')[0]);
 console.log(`  headless fps ≈ ${fps} (SwiftShader; real GPUs are far faster)`);
 console.log(errors.length ? `console problems:\n  ${errors.join('\n  ')}` : 'no console errors or warnings');

@@ -6,7 +6,7 @@ import * as THREE from 'three';
 
 const DEFAULT_PALETTE = {
   sky: 0x0a0d18, fog: 0x0a0d18, ground: 0x15181f, road: 0x1d222c, lane: 0x7d8696, kerb: 0x2a3040,
-  concrete: 0x4a5160, rail: 0x8893a6, fence: 0x58e0ff,
+  concrete: 0x5a6378, rail: 0x8893a6, fence: 0x58e0ff, lamp: 0xffe2b0, post: 0x1b1f2a,
   buildings: [0x2b3346, 0x343c52, 0x3d4154, 0x283447, 0x3a3348],
 };
 
@@ -79,6 +79,10 @@ export function buildStageVisual(scene, stage, options = {}) {
   for (const s of stage.statics) (byTag[s.tag || 'building'] = byTag[s.tag || 'building'] || []).push(s);
   if (byTag.building) group.add(buildBuildings(byTag.building, pal));
   for (const tag of ['deck', 'kerb', 'rail', 'pillar', 'prop']) if (byTag[tag]) group.add(buildPlainBoxes(byTag[tag], tag, pal));
+  for (const r of stage.ramps || []) group.add(buildRamp(r, pal));
+  const vis = stage.visual || {};
+  if (vis.lamps && vis.lamps.length) group.add(buildLamps(vis.lamps, pal));
+  if (vis.lanes && vis.lanes.length) group.add(buildDashes(vis.lanes, pal));
 
   // The arena fence: faint glowing walls at the bounds.
   const fenceMat = new THREE.MeshBasicMaterial({ color: pal.fence, transparent: true, opacity: 0.08, side: THREE.DoubleSide, depthWrite: false });
@@ -99,6 +103,56 @@ export function buildStageVisual(scene, stage, options = {}) {
       group.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material && o.material.dispose) o.material.dispose(); });
     },
   };
+}
+
+// Street lamps: a dark post and an emissive head (bloom makes them glow). Purely visual.
+function buildLamps(lamps, pal) {
+  const g = new THREE.Group();
+  g.name = 'lamps';
+  const posts = new THREE.InstancedMesh(new THREE.BoxGeometry(0.6, 8, 0.6), new THREE.MeshStandardMaterial({ color: pal.post, roughness: 0.7, metalness: 0.5 }), lamps.length);
+  const heads = new THREE.InstancedMesh(new THREE.BoxGeometry(2.4, 0.5, 1.2), new THREE.MeshStandardMaterial({ color: pal.lamp, emissive: pal.lamp, emissiveIntensity: 2.5, roughness: 0.4 }), lamps.length);
+  const m = new THREE.Matrix4();
+  lamps.forEach((l, i) => {
+    m.identity().setPosition(l.post[0], l.post[1] + 4, l.post[2]);
+    posts.setMatrixAt(i, m);
+    m.identity().setPosition(l.head[0], l.head[1], l.head[2]);
+    heads.setMatrixAt(i, m);
+  });
+  posts.name = 'lamp-posts'; heads.name = 'lamp-heads';
+  g.add(posts, heads);
+  return g;
+}
+
+// Dashed centre lines (6 m dash, 6 m gap) for roads and decks.
+function buildDashes(lanes, pal) {
+  const pts = [];
+  for (const l of lanes) {
+    const dx = l.x1 - l.x0, dz = l.z1 - l.z0, len = Math.hypot(dx, dz), ux = dx / len, uz = dz / len;
+    for (let d = 3; d + 6 <= len; d += 12) {
+      pts.push(l.x0 + ux * d, l.y + 0.06, l.z0 + uz * d, l.x0 + ux * (d + 6), l.y + 0.06, l.z0 + uz * (d + 6));
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  const lines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: pal.lamp, transparent: true, opacity: 0.7 }));
+  lines.name = 'dashes';
+  return lines;
+}
+
+// A ramp's walkable slope as a tilted slab whose top face is the surface the controller walks on.
+function buildRamp(r, pal) {
+  const alongX = r.axis === 'x';
+  const len = alongX ? r.max[0] - r.min[0] : r.max[2] - r.min[2];
+  const width = alongX ? r.max[2] - r.min[2] : r.max[0] - r.min[0];
+  const rise = r.max[1] - r.min[1];
+  const slope = Math.hypot(len, rise), angle = Math.atan2(rise, len), thick = 1.5;
+  const geo = alongX ? new THREE.BoxGeometry(slope, thick, width) : new THREE.BoxGeometry(width, thick, slope);
+  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: pal.concrete, roughness: 0.85, metalness: 0.05 }));
+  if (alongX) mesh.rotation.z = r.up * angle; else mesh.rotation.x = -r.up * angle;
+  const normal = new THREE.Vector3(0, 1, 0).applyEuler(mesh.rotation);
+  mesh.position.set((r.min[0] + r.max[0]) / 2, (r.min[1] + r.max[1]) / 2, (r.min[2] + r.max[2]) / 2).addScaledVector(normal, -thick / 2);
+  mesh.name = 'ramp';
+  return mesh;
 }
 
 function buildPlainBoxes(list, tag, pal) {

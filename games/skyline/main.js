@@ -15,6 +15,8 @@ import { buildStageVisual, setNightEnvironment } from '../../engine/render/world
 import { buildMech } from '../../engine/render/mech-builder.js';
 import { animateMech } from '../../engine/render/mech-anim.js';
 import { createBar, el } from '../../engine/render/hud.js';
+import { createSky } from '../../engine/render/sky.js';
+import { createBlobShadow } from '../../engine/render/fx.js';
 import * as CFG from './config.js';
 import { generateCity } from './stages/city.js';
 import { createWorld, stepWorld } from './rules/world.js';
@@ -27,12 +29,17 @@ const seed = Number(params.get('seed')) || 7;
 const stage = generateCity(Object.assign({ seed }, CFG.STAGES.city));
 const world = createWorld({ stage, seed });
 const me = world.fighters[0];
+// Development: ?pos=x,y,z and ?look=yaw,pitch place the player and the camera for screenshots.
+if (params.get('pos')) { const [x, y, z] = params.get('pos').split(',').map(Number); Object.assign(me.pos, { x, y, z }); me.onGround = false; }
 
 // Scene.
 const canvas = document.getElementById('game');
 const app = createRenderApp(canvas, { fov: CFG.CAMERA.tp.fov });
 setNightEnvironment(app.renderer, app.scene);
 buildStageVisual(app.scene, stage);
+const sky = createSky();
+app.scene.add(sky.mesh);
+const shadows = world.fighters.map(() => { const s = createBlobShadow(7); app.scene.add(s.mesh); return s; });
 const mechs = world.fighters.map((f, i) => {
   const mech = buildMech(i === 0 ? AX01 : withPalette(AX01, CFG.PALETTES.crimson, 'ax01-crimson'));
   mech.group.position.set(f.pos.x, f.pos.y, f.pos.z);
@@ -45,6 +52,7 @@ const mechs = world.fighters.map((f, i) => {
 const keyboard = createKeyboard();
 const mouse = createMouse(canvas);
 const look = { yaw: stage.spawns[0].yaw, pitch: -0.18 };
+if (params.get('look')) { const [yaw, pitch] = params.get('look').split(',').map(Number); look.yaw = yaw; look.pitch = pitch; }
 const mapper = createMapper({ keyboard, mouse, bindings: CFG.BINDINGS, look, sensitivity: CFG.CAMERA.sensitivity,
   keyLookRate: CFG.CAMERA.keyLookRate, pitchLimits: CFG.CAMERA.pitchLimits });
 const tpRig = createThirdPersonRig(app.camera, CFG.CAMERA.tp);
@@ -96,6 +104,7 @@ const loop = createLoop({
       const p = prev[i], m = mechs[i];
       m.group.position.set(p.x + (f.pos.x - p.x) * alpha, p.y + (f.pos.y - p.y) * alpha, p.z + (f.pos.z - p.z) * alpha);
       m.group.rotation.y = lerpAngle(p.yaw, f.yaw, alpha);
+      shadows[i].update(m.group.position, world.statics);
       animateMech(m, {
         speed: Math.hypot(f.vel.x, f.vel.z), runSpeed: CFG.MOVE.run, onGround: f.onGround, boosting: f.boosting,
         dashing: f.dashTimer > 0, vy: f.vel.y, landLag: f.landLag, aiming: f.aiming, aimPitch: f.aim.pitch,
@@ -105,6 +114,7 @@ const loop = createLoop({
     mechs[0].group.visible = !(me.aiming && !cam.blending);
     cam.update(frameDt, mechs[0].group.position, look, world.statics);
     crosshair.classList.toggle('on', me.aiming);
+    sky.update(app.camera);
     app.render();
 
     fuelBar.set(me.fuel / CFG.MOVE.fuelMax, me.fuel < CFG.MOVE.dashFuel ? 'low' : '');
@@ -121,4 +131,4 @@ window.addEventListener('keydown', (e) => { if (e.code === 'F3') { showDebug = !
 loop.start();
 
 // Hooks for tests and tooling.
-window.__skyline = { world, look, mouse, get playing() { return playing; }, setPlaying, stage, version: CFG.GAME.version };
+window.__skyline = { world, look, mouse, app, get playing() { return playing; }, setPlaying, stage, version: CFG.GAME.version };
