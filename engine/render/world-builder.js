@@ -4,6 +4,7 @@
 // scene from day (0) through dusk (0.5) to night (1): sky, sun, fog, windows and lamps follow.
 
 import * as THREE from 'three';
+import { makeRng } from '../core/rng.js';
 
 const DEFAULT_PALETTE = {
   ground: 0x15181f, road: 0x1d222c, lane: 0x7d8696, kerb: 0x2a3040,
@@ -17,6 +18,19 @@ const PHASES = [
   { t: 0.5, sky: [0x2e3f7a, 0xff9c5c, 0x2a2430], sun: { color: 0xffb070, intensity: 1.7, dir: [-0.9, 0.22, 0.3] }, hemi: { sky: 0x6a6fb0, ground: 0x3a3038, intensity: 1.0 }, fog: 0x6b5a7a, fogDensity: 0.0006, stars: 0.3, night: 0.45, envDay: 0.5 },
   { t: 1, sky: [0x070b1a, 0x2a3a66, 0x05060a], sun: { color: 0xb4c2ff, intensity: 1.9, dir: [-0.5, 0.78, 0.36] }, hemi: { sky: 0x5f74ad, ground: 0x0d1016, intensity: 1.6 }, fog: 0x0a0d18, fogDensity: 0.0009, stars: 1, night: 1, envDay: 0 },
 ];
+
+// Themes: a palette and lighting keyframes per kind of stage. The lunar theme is night at every time
+// of day, lit hard by an unfiltered sun, with the Earth over the horizon and crater rings on the ground.
+const LUNAR = { sky: [0x02030a, 0x0a1026, 0x020305], sun: { color: 0xfff6e8, intensity: 2.6, dir: [0.5, 0.8, -0.3] }, hemi: { sky: 0x3b4a7a, ground: 0x17181d, intensity: 0.9 }, fog: 0x05060c, fogDensity: 0.00012, stars: 1, night: 1, envDay: 0 };
+export const THEMES = {
+  city: { palette: DEFAULT_PALETTE, phases: PHASES },
+  moon: {
+    palette: Object.assign({}, DEFAULT_PALETTE, { ground: 0x44464c, road: 0x35373d, lane: 0x8d93a0, kerb: 0x3a3c42, concrete: 0x6b6f7a, rail: 0x9aa3b2, lamp: 0xd8ecff, rock: 0x55575d, buildings: [0x3b4250, 0x454c5c, 0x4d4a56, 0x3a4652, 0x50545f] }),
+    phases: [Object.assign({ t: 0 }, LUNAR), Object.assign({ t: 0.5 }, LUNAR), Object.assign({ t: 1 }, LUNAR)],
+    earth: { dir: [0.35, 0.5, -0.75], size: 0.1, sun: [0.5, 0.8, -0.3] },
+    craters: 36,
+  },
+};
 
 function gradientEnvironment(renderer, stops) {
   const c = document.createElement('canvas');
@@ -51,16 +65,18 @@ export function setNightEnvironment(renderer, scene) {
 }
 
 export function buildStageVisual(scene, stage, options = {}) {
-  const pal = Object.assign({}, DEFAULT_PALETTE, (stage.visual && stage.visual.palette) || {}, options.palette || {});
+  const theme = THEMES[options.theme || stage.theme] || THEMES.city;
+  const PH = theme.phases;
+  const pal = Object.assign({}, theme.palette, (stage.visual && stage.visual.palette) || {}, options.palette || {});
   const group = new THREE.Group();
   group.name = `stage:${stage.id}`;
   const b = stage.bounds;
   const groundY = stage.groundY || 0;
 
-  scene.background = new THREE.Color(PHASES[2].fog);
-  scene.fog = new THREE.FogExp2(PHASES[2].fog, PHASES[2].fogDensity);
-  const hemi = new THREE.HemisphereLight(PHASES[2].hemi.sky, PHASES[2].hemi.ground, PHASES[2].hemi.intensity);
-  const sun = new THREE.DirectionalLight(PHASES[2].sun.color, PHASES[2].sun.intensity);
+  scene.background = new THREE.Color(PH[2].fog);
+  scene.fog = new THREE.FogExp2(PH[2].fog, PH[2].fogDensity);
+  const hemi = new THREE.HemisphereLight(PH[2].hemi.sky, PH[2].hemi.ground, PH[2].hemi.intensity);
+  const sun = new THREE.DirectionalLight(PH[2].sun.color, PH[2].sun.intensity);
   sun.position.set(-320, 520, 240);
   group.add(hemi, sun);
 
@@ -70,6 +86,7 @@ export function buildStageVisual(scene, stage, options = {}) {
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = groundY;
   group.add(ground);
+  if (theme.craters) group.add(buildCraters(stage, theme.craters, pal, groundY));
 
   // Roads: lighter strips with a pale line along each edge.
   const roads = (stage.visual && stage.visual.roads) || [];
@@ -96,7 +113,7 @@ export function buildStageVisual(scene, stage, options = {}) {
   for (const s of stage.statics) (byTag[s.tag || 'building'] = byTag[s.tag || 'building'] || []).push(s);
   const buildings = byTag.building ? buildBuildings(byTag.building, pal) : null;
   if (buildings) group.add(buildings.mesh);
-  for (const tag of ['deck', 'kerb', 'rail', 'pillar', 'prop']) if (byTag[tag]) group.add(buildPlainBoxes(byTag[tag], tag, pal));
+  for (const tag of ['deck', 'kerb', 'rail', 'pillar', 'prop', 'rock']) if (byTag[tag]) group.add(buildPlainBoxes(byTag[tag], tag, pal));
   for (const r of stage.ramps || []) group.add(buildRamp(r, pal));
   const vis = stage.visual || {};
   const lamps = vis.lamps && vis.lamps.length ? buildLamps(vis.lamps, pal) : null;
@@ -122,7 +139,7 @@ export function buildStageVisual(scene, stage, options = {}) {
   const phase = { sky: { top: new THREE.Color(), horizon: new THREE.Color(), bottom: new THREE.Color() }, stars: 1, night: 1 };
   function setTimeOfDay(t) {
     t = Math.max(0, Math.min(1, t));
-    const [p, q] = t < 0.5 ? [PHASES[0], PHASES[1]] : [PHASES[1], PHASES[2]];
+    const [p, q] = t < 0.5 ? [PH[0], PH[1]] : [PH[1], PH[2]];
     const k = (t - p.t) / (q.t - p.t);
     const num = (a, b2) => a + (b2 - a) * k;
     phase.sky.top.copy(lerpColor(p.sky[0], q.sky[0], k));
@@ -152,6 +169,7 @@ export function buildStageVisual(scene, stage, options = {}) {
 
   return {
     group, setTimeOfDay, phase,
+    theme: { id: options.theme || stage.theme || 'city', earth: theme.earth || null },
     dispose() {
       scene.remove(group);
       group.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material && o.material.dispose) o.material.dispose(); });
@@ -208,9 +226,32 @@ function buildRamp(r, pal) {
   return mesh;
 }
 
+// Shallow crater rings on the ground (visual only), placed by the stage seed clear of buildings.
+function buildCraters(stage, count, pal, groundY) {
+  const g = new THREE.Group();
+  g.name = 'craters';
+  const rnd = makeRng((stage.seed || 1) * 7 + 5);
+  const b = stage.bounds;
+  const rimMat = new THREE.MeshStandardMaterial({ color: pal.concrete, roughness: 1, metalness: 0 });
+  const floorMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(pal.ground).multiplyScalar(0.72), roughness: 1, metalness: 0 });
+  const clearOf = (x, z, r) => !stage.statics.some((s) => s.tag === 'building' && x - r < s.max[0] && x + r > s.min[0] && z - r < s.max[2] && z + r > s.min[2]);
+  for (let i = 0, tries = 0; i < count && tries < count * 10; tries++) {
+    const r = rnd.range(6, 22);
+    const x = rnd.range(b.minX + r, b.maxX - r), z = rnd.range(b.minZ + r, b.maxZ - r);
+    if (!clearOf(x, z, r)) continue;
+    const rim = new THREE.Mesh(new THREE.RingGeometry(r * 0.78, r, 28), rimMat);
+    rim.rotation.x = -Math.PI / 2; rim.position.set(x, groundY + 0.05, z);
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(r * 0.78, 28), floorMat);
+    floor.rotation.x = -Math.PI / 2; floor.position.set(x, groundY + 0.04, z);
+    g.add(rim, floor);
+    i++;
+  }
+  return g;
+}
+
 function buildPlainBoxes(list, tag, pal) {
-  const color = tag === 'rail' ? pal.rail : tag === 'kerb' ? pal.kerb : pal.concrete;
-  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.8, metalness: tag === 'rail' ? 0.6 : 0.05 });
+  const color = tag === 'rail' ? pal.rail : tag === 'kerb' ? pal.kerb : tag === 'rock' ? (pal.rock || pal.concrete) : pal.concrete;
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: tag === 'rock' ? 1 : 0.8, metalness: tag === 'rail' ? 0.6 : 0.05 });
   const geo = new THREE.BoxGeometry(1, 1, 1);
   const mesh = new THREE.InstancedMesh(geo, mat, list.length);
   const m = new THREE.Matrix4();

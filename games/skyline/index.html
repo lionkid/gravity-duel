@@ -77,7 +77,7 @@
   .debug { position: absolute; left: 16px; top: calc(96px + env(safe-area-inset-top, 0px)); font: 12px var(--mono); color: var(--muted); white-space: pre; text-shadow: 0 1px 2px #000; }
 
   /* Menus: one panel in the middle of the screen, the live city behind it. */
-  #screens { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; box-sizing: border-box; overflow: auto; background: radial-gradient(ellipse at center, rgba(10, 13, 24, 0.35), rgba(10, 13, 24, 0.85)); }
+  #screens { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 16px; box-sizing: border-box; overflow: auto; background: radial-gradient(ellipse at center, rgba(10, 13, 24, 0.35), rgba(10, 13, 24, 0.85)); }
   #screens[hidden] { display: none; }
   #screens[data-screen="pause"], #screens[data-screen="ko"] { background: rgba(10, 13, 24, 0.55); }
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 22px 26px; width: min(560px, 100%); box-sizing: border-box; backdrop-filter: blur(6px); }
@@ -105,10 +105,13 @@
   .picker { display: grid; gap: 8px; margin: 14px 0 6px; }
   .picker .row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
   .picker .rowlabel { color: var(--muted); font-size: 13px; width: 40px; }
-  .picker .opt { pointer-events: auto; cursor: pointer; font: 14px var(--body); color: var(--fg); background: rgba(255, 255, 255, 0.04); border: 1px solid var(--line); border-radius: 4px; padding: 6px 12px; }
-  .picker .opt:hover { border-color: var(--muted); }
-  .picker .opt:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .picker .opt.on { border-color: var(--accent); color: var(--accent); background: rgba(88, 224, 255, 0.08); }
+  .picker .opt, .seg .opt { pointer-events: auto; cursor: pointer; font: 14px var(--body); color: var(--fg); background: rgba(255, 255, 255, 0.04); border: 1px solid var(--line); border-radius: 4px; padding: 6px 12px; }
+  .picker .opt:hover, .seg .opt:hover { border-color: var(--muted); }
+  .picker .opt:focus-visible, .seg .opt:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .picker .opt.on, .seg .opt.on { border-color: var(--accent); color: var(--accent); background: rgba(88, 224, 255, 0.08); }
+  .picker .opt:disabled { opacity: 0.5; cursor: default; }
+  .seg { display: flex; flex-wrap: wrap; gap: 6px; }
+  .stagepick { margin-top: 14px; }
   .pickdesc { color: var(--muted); font-size: 12px; margin: 0 0 4px; min-height: 2.4em; }
   .cpu { color: var(--gold); font-size: 13px; margin: 0; }
   .settings { display: grid; grid-template-columns: auto 1fr 4em; align-items: center; gap: 12px; margin: 14px 0 0; font-size: 13px; color: var(--muted); }
@@ -149,6 +152,23 @@
   .sub.center { text-align: center; }
   @media (max-width: 600px) { .seats { grid-template-columns: 1fr; } }
   .net { position: absolute; right: 16px; top: calc(14px + env(safe-area-inset-top, 0px)); font: 12px var(--mono); color: var(--muted); text-align: right; text-shadow: 0 1px 2px #000; }
+  /* Touch controls: a floating stick on the left, camera drag on the right, buttons bottom right. */
+  #touch { position: fixed; inset: 0; z-index: 5; touch-action: none; user-select: none; -webkit-user-select: none; }
+  #touch[hidden] { display: none; }
+  #touch .zone { position: absolute; top: 0; bottom: 0; width: 50%; }
+  #touch .zone.left { left: 0; }
+  #touch .zone.right { right: 0; }
+  #touch .stick { position: absolute; left: 0; top: 0; width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%; border: 2px solid rgba(88, 224, 255, 0.5); background: rgba(9, 12, 22, 0.35); pointer-events: none; display: none; }
+  #touch .stick.on { display: block; }
+  #touch .stick i { position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px 0 0 -24px; border-radius: 50%; background: rgba(88, 224, 255, 0.55); }
+  #touch .tbtns { position: absolute; right: 14px; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); display: grid; grid-template-columns: repeat(3, 72px); gap: 10px; justify-items: end; align-items: end; }
+  #touch .tbtns button { width: 64px; height: 64px; border-radius: 50%; border: 2px solid rgba(142, 151, 173, 0.5); background: rgba(9, 12, 22, 0.5); color: var(--fg); font: 14px var(--body); touch-action: none; padding: 0; }
+  #touch .tbtns button.big { width: 72px; height: 72px; font-size: 15px; }
+  #touch .tbtns button.small { width: 52px; height: 52px; font-size: 12px; }
+  #touch .tbtns button.on { border-color: var(--accent); background: rgba(88, 224, 255, 0.3); }
+  body.touch .weapons { bottom: calc(250px + env(safe-area-inset-bottom, 0px)); }
+  body.touch .slot { min-width: 110px; }
+  body.touch .gauges { width: 40vw; }
   @media (max-width: 480px) { .panel h1 { font-size: 26px; } .panel h2.big { font-size: 40px; } .top, .gauges { width: 46vw; } .slot { min-width: 110px; } }
   @media (prefers-reduced-motion: reduce) { .enemy, .reticle, .lost, .crosshair, .ko, .msg { transition: none; } }
 </style>
@@ -160,6 +180,22 @@
 <canvas id="game"></canvas>
 <div id="hud"></div>
 <div id="screens" hidden></div>
+<div id="touch" hidden>
+  <div class="zone left"></div>
+  <div class="zone right"></div>
+  <div class="stick"><i></i></div>
+  <div class="tbtns">
+    <button type="button" data-action="pause" class="small">選單</button>
+    <button type="button" data-action="switchNext" class="small">切換</button>
+    <button type="button" data-action="lock" class="small">鎖定</button>
+    <button type="button" data-action="guard">防禦</button>
+    <button type="button" data-action="dash">衝刺</button>
+    <button type="button" data-action="aim">瞄準</button>
+    <span></span>
+    <button type="button" data-action="attack" class="big">攻擊</button>
+    <button type="button" data-action="boost" class="big">噴射</button>
+  </div>
+</div>
 <script type="module" src="./main.js"></script>
 </body>
 </html>

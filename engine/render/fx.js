@@ -61,11 +61,13 @@ export function createSparks(scene, { max = 512, size = 1.4 } = {}) {
   scene.add(points);
   let next = 0;
   const rnd = Math.random;
-  return {
+  const pool = {
+    density: 1,                 // quality setting: the share of particles a burst asks for
     // n particles from (x, y, z), speeds up to `speed`, living about `lifeSec`; gravity pulls them down,
     // drag slows them (smoke hangs, sparks fly). `dir` biases the burst along a direction.
     burst(x, y, z, color, n = 16, speed = 30, lifeSec = 0.5, gravity = 40, dragK = 0, dir = null, bias = 0) {
       tmpColor.setHex(color == null ? 0xffffff : color);
+      n = Math.max(1, Math.round(n * pool.density));
       for (let k = 0; k < n; k++) {
         const i = next; next = (next + 1) % max;
         pos.set([x, y, z], i * 3);
@@ -94,6 +96,7 @@ export function createSparks(scene, { max = 512, size = 1.4 } = {}) {
     },
     clear() { ttl.fill(0); },
   };
+  return pool;
 }
 
 // Camera-facing flashes for muzzles and explosions: a sprite that blows up and fades in a few frames.

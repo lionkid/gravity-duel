@@ -9,6 +9,8 @@ import { lerpAngle, dirToAim, distXZ, angleDiff } from '../../engine/core/math.j
 import { createKeyboard } from '../../engine/input/keyboard.js';
 import { createMouse } from '../../engine/input/mouse.js';
 import { createMapper } from '../../engine/input/bindings.js';
+import { createGamepad } from '../../engine/input/gamepad.js';
+import { createTouch } from '../../engine/input/touch.js';
 import { IDLE_INTENT, createIntent, clearIntent } from '../../engine/input/intent.js';
 import { createRenderApp } from '../../engine/render/app.js';
 import { createThirdPersonRig, createFirstPersonRig, createLockOnRig, createCameraBlender, createShake } from '../../engine/render/rigs.js';
@@ -40,7 +42,9 @@ const load = (key, fallback) => { try { return Object.assign(fallback, JSON.pars
 const save = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* private mode */ } };
 
 // Settings and the player's loadout live in this browser; the URL can override them (?weapon=&armor=&cpu=).
-const settings = load('skyline.settings', { sens: 1, volume: 0.5, bloom: true, cpu: 'normal' });
+const settings = load('skyline.settings', { sens: 1, volume: 0.5, bloom: true, quality: '', invertY: false, fps: false, touch: 'auto', cpu: 'normal', stage: 'city' });
+if (!CFG.QUALITY[settings.quality]) settings.quality = settings.bloom === false ? 'low' : 'medium';   // older saves only knew bloom on/off
+if (!['auto', 'on', 'off'].includes(settings.touch)) settings.touch = 'auto';
 settings.cpu = pick(AI_LEVELS, params.get('cpu') || settings.cpu, 'normal');
 const storedLoadout = load('skyline.loadout', {});
 const loadout = {
@@ -60,13 +64,14 @@ const loadoutText = (l) => `${CFG.WEAPON_CLASSES[l.weapon].zh}武裝 · ${CFG.AR
 const todOverride = params.has('tod') ? Number(params.get('tod')) : null;
 
 // Stage and scene (built once; battles are restarted inside it).
-const stage = generateCity(Object.assign({ seed }, CFG.STAGES.city));
+let stageId = pick(CFG.STAGES, params.get('stage') || settings.stage, 'city');
+let stage = generateCity(Object.assign({ seed }, CFG.STAGES[stageId]));
 const canvas = document.getElementById('game');
 const app = createRenderApp(canvas, { fov: CFG.CAMERA.tp.fov });
 const environments = createEnvironments(app.renderer);
-const dusk = CFG.STAGES.city.dusk;
-const stageVis = buildStageVisual(app.scene, stage, { environments, timeOfDay: dusk.start });
+let stageVis = buildStageVisual(app.scene, stage, { environments, timeOfDay: CFG.STAGES[stageId].dusk.start });
 const sky = createSky();
+sky.set({ earth: stageVis.theme.earth || null });
 app.scene.add(sky.mesh);
 const post = params.get('bloom') === '0' ? null : createPost(app, { strength: 0.42, radius: 0.3, threshold: 1.0 });
 const mechs = [buildMech(AX01), buildMech(withPalette(AX01, CFG.PALETTES.crimson, 'ax01-crimson'))];
@@ -98,8 +103,10 @@ window.addEventListener('keydown', () => sfx.unlock());
 // Input and cameras.
 const keyboard = createKeyboard();
 const mouse = createMouse(canvas);
+const gamepad = createGamepad(CFG.BINDINGS.pad);
+const touchUi = createTouch(document.getElementById('touch'), { toggle: CFG.BINDINGS.touch.toggle, onInteract: () => sfx.unlock() });
 const look = { yaw: 0, pitch: -0.18 };
-const mapper = createMapper({ keyboard, mouse, bindings: CFG.BINDINGS, look, sensitivity: CFG.CAMERA.sensitivity * settings.sens,
+const mapper = createMapper({ keyboard, mouse, gamepad, touch: touchUi, bindings: CFG.BINDINGS, look, sensitivity: CFG.CAMERA.sensitivity * settings.sens,
   keyLookRate: CFG.CAMERA.keyLookRate, pitchLimits: CFG.CAMERA.pitchLimits });
 const tpRig = createThirdPersonRig(app.camera, CFG.CAMERA.tp);
 const fpRig = createFirstPersonRig(app.camera, CFG.CAMERA.fp);
@@ -163,6 +170,19 @@ let session = { kind: 'local', sync: null };
 let mySeat = 1;
 let lastView = null;                         // the guest's previously rendered predicted world
 const hostHashes = new Map();                // host, ?debug only: tick → state hash, for the LAN smoke test
+// Switches the arena (solo: the player's pick; LAN: the host's). The scene is rebuilt in place.
+function setStage(id, { fromPeer = false } = {}) {
+  if (!CFG.STAGES[id] || id === stageId) return;
+  stageId = id;
+  settings.stage = id;
+  stageVis.dispose();
+  stage = generateCity(Object.assign({ seed }, CFG.STAGES[stageId]));
+  stageVis = buildStageVisual(app.scene, stage, { environments, timeOfDay: CFG.STAGES[stageId].dusk.start });
+  sky.set({ earth: stageVis.theme.earth || null });
+  app.renderer.compile(app.scene, app.camera);
+  if (!inBattle) setupWorld();
+  if (!fromPeer) lobby.setStage(id);
+}
 // A fresh world with both mechs at their spawns; also what stands behind the title screen.
 function setupWorld({ matchSeed = seed, loadouts = { 1: loadout, 2: cpuLoadout } } = {}) {
   world = createWorld({ stage, seed: matchSeed, loadouts });
@@ -239,7 +259,8 @@ function startBattle() {
   beginBattle();
 }
 // LAN: both browsers build the same world from the host's seed and loadouts; seat 1 runs it.
-function startLan({ seed: matchSeed, loadouts, seat }) {
+function startLan({ seed: matchSeed, loadouts, seat, stage: sid }) {
+  if (sid) setStage(sid, { fromPeer: true });
   mySeat = seat;
   session = { kind: seat === 1 ? 'host' : 'guest', sync: null };
   setupWorld({ matchSeed, loadouts });
@@ -302,6 +323,8 @@ let lanShown = '';
 const lobby = createLobby({
   socket, loadout,
   onChange: (st) => {
+    // The host picks the arena; the guest's background follows.
+    if (!lobby.isHost && st.peerStage && st.peerStage !== stageId && !inBattle) setStage(st.peerStage, { fromPeer: true });
     if (ui.name === 'lan') {
       const sig = JSON.stringify([st.rooms, st.self, st.note, st.scanned, st.server]);
       if (sig === lanShown) return;
@@ -314,6 +337,7 @@ const lobby = createLobby({
   onLobby: () => { if (inBattle) quit(true); ui.hide(); ui.show('room'); },
 });
 lobby.detectServer();
+lobby.setStage(stageId);
 const ui = createScreens(document.getElementById('screens'));
 const ctx = {
   loadout, cpuLoadout, settings, sfx, version: CFG.GAME.version,
@@ -322,6 +346,9 @@ const ctx = {
   get note() { return mouse.state.supported ? '' : '這裡無法鎖定滑鼠：用方向鍵控制鏡頭與準星，Esc 暫停。'; },
   startBattle, resume, quit,
   lan: lobby.state, lanDraft: '',
+  get stageId() { return stageId; },
+  setStage: (id) => setStage(id),
+  get padConnected() { return gamepad.connected; },
   isLan: () => session.kind !== 'local',
   lanBrowse: () => { lanShown = ''; lobby.browse(); }, lanConnect: (base) => lobby.connect(base), lanLeave: () => lobby.leave(),
   lanReady: (on) => lobby.setReady(on), lanAgain: () => lobby.again(), lanLobby: () => lobby.goLobby(),
@@ -329,9 +356,15 @@ const ctx = {
   rerollCpu() { cpuRoll = (cpuRoll * 7 + 5) % 997; rollCpu(); },
   saveSettings() { save('skyline.settings', settings); save('skyline.loadout', loadout); },
   applySettings() {
+    const q = CFG.QUALITY[settings.quality] || CFG.QUALITY.medium;
     mapper.settings.sensitivity = CFG.CAMERA.sensitivity * settings.sens;
+    mapper.settings.invertY = !!settings.invertY;
     sfx.setVolume(settings.volume);
-    if (post) post.setEnabled(settings.bloom);
+    settings.bloom = q.bloom;
+    if (post) post.setEnabled(q.bloom);
+    app.setPixelRatioCap(q.pixelRatio);
+    for (const fx of [sparks, smoke, debris]) fx.density = q.particles;
+    touchUi.setMode(settings.touch);
   },
 };
 defineScreens(ui, ctx);
@@ -515,13 +548,19 @@ const loop = createLoop({
     sfx.listen(app.camera);
     updateThrusterLoops(sfx, world, inBattle && (playing || !!world.winner));
     // Late afternoon into night over the course of the match (?tod=0..1 pins it for screenshots).
-    const phase = stageVis.setTimeOfDay(todOverride == null ? dusk.start + (1 - dusk.start) * world.time / dusk.toNight : todOverride);
+    const dk = CFG.STAGES[stageId].dusk;
+    const phase = stageVis.setTimeOfDay(todOverride == null ? dk.start + (1 - dk.start) * world.time / dk.toNight : todOverride);
     sky.set({ top: phase.sky.top, horizon: phase.sky.horizon, bottom: phase.sky.bottom, stars: phase.stars });
     sky.update(app.camera);
     app.render();
 
     // HUD.
     hud.classList.toggle('hidden', !inBattle);
+    // Menus by gamepad (d-pad or stick flicks, A, B); touch controls only while playing.
+    if (ui.name) { for (const b of gamepad.consumeMenu()) { if (b === 'Down') ui.moveFocus(1); else if (b === 'Up') ui.moveFocus(-1); else if (b === 'A') ui.activate(); else if (b === 'B' || b === 'Back' || b === 'Start') ui.escape(); } }
+    else gamepad.consumeMenu();
+    touchUi.setVisible(inBattle && playing && !ui.name);
+    document.body.classList.toggle('touch', touchUi.shown);
     frames++; fpsTime += frameDt;
     if (fpsTime >= 0.5) { fps = Math.round(frames / fpsTime); frames = 0; fpsTime = 0; }
     if (!inBattle) return;
@@ -578,17 +617,22 @@ const loop = createLoop({
         `  ${me.active}${me.melee ? ' ' + me.melee.stage : ''}  lock ${me.lock}/${me.lockLos ? 'los' : 'hidden'}  hp ${me.hp}/${enemy.hp}` +
         `  look ${look.yaw.toFixed(2)} ${look.pitch.toFixed(2)}  mouse ${mouse.state.locked}`;
     } else if (debug.textContent) debug.textContent = '';
+    const info = [];
+    if (settings.fps) info.push(`${fps} fps`);
     if (session.kind !== 'local') {
       const st = session.sync.stats;
-      netBox.textContent = session.kind === 'host' ? `區網主機 · 對手輸入遲到 ${st.late}` : `區網 · 延遲 ${st.rtt.toFixed(0)} ms · 領先 ${st.lead} tick · 輸入延遲 ${st.delay} · 修正 ${st.corrections}`;
-    } else if (netBox.textContent) netBox.textContent = '';
+      info.push(session.kind === 'host' ? `區網主機 · 對手輸入遲到 ${st.late}` : `區網 · 延遲 ${st.rtt.toFixed(0)} ms · 領先 ${st.lead} tick · 輸入延遲 ${st.delay} · 修正 ${st.corrections}`);
+    }
+    const infoText = info.join(' · ');
+    if (netBox.textContent !== infoText) netBox.textContent = infoText;
   },
 });
 loop.start();
 
 // Hooks for tests and tooling.
 window.__skyline = {
-  get world() { return world; }, look, mouse, app, post, sfx, ui, settings, stage, loadout, cpuLoadout, socket, lobby,
+  get world() { return world; }, look, mouse, gamepad, touch: touchUi, app, post, sfx, ui, settings, loadout, cpuLoadout, socket, lobby,
+  get stage() { return stage; }, get stageId() { return stageId; }, setStage,
   get playing() { return playing; }, get inBattle() { return inBattle; }, get mySeat() { return mySeat; },
   get net() {
     if (session.kind === 'local') return { kind: 'local' };

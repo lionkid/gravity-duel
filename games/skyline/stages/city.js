@@ -11,7 +11,7 @@
 import { makeRng } from '../../../engine/core/rng.js';
 
 export function generateCity(opts = {}) {
-  const o = Object.assign({ seed: 1, blocks: 8, pitch: 100, street: 30, minHeight: 25, maxHeight: 130, stepHeight: 45, gravity: 32, highway: true }, opts);
+  const o = Object.assign({ seed: 1, blocks: 8, pitch: 100, street: 30, minHeight: 25, maxHeight: 130, stepHeight: 45, gravity: 32, highway: true, rocks: 0, id: 'city', theme: 'city' }, opts);
   const rnd = makeRng(o.seed);
   const half = o.blocks * o.pitch / 2;
   const lot = o.pitch - o.street;
@@ -51,8 +51,13 @@ export function generateCity(opts = {}) {
   const sz = highway ? Math.min(80, highway.R - o.street / 2 - HW.rampLen - 25) : half - o.pitch / 2;
   const spawns = [{ pos: { x: 0, y: 0, z: sz }, yaw: 0 }, { pos: { x: 0, y: 0, z: -sz }, yaw: Math.PI }];
 
+  // Boulders in the streets (the moon): low cover against the vulcan, never on the central cross where
+  // the spawns and ramps are, never touching anything else.
+  if (o.rocks > 0) scatterRocks(rnd, o, half, statics, spawns);
+
   return {
-    id: 'city',
+    id: o.id,
+    theme: o.theme,
     seed: o.seed,
     gravity: o.gravity,
     groundY: 0,
@@ -63,6 +68,26 @@ export function generateCity(opts = {}) {
     highway,
     visual: { roads, lamps, lanes, pitch: o.pitch, street: o.street },
   };
+}
+
+function scatterRocks(rnd, o, half, statics, spawns) {
+  const hs = o.street / 2;
+  let placed = 0;
+  for (let tries = 0; tries < o.rocks * 12 && placed < o.rocks; tries++) {
+    const k = 1 + rnd.int(o.blocks - 1);                      // a street grid line
+    const c = -half + k * o.pitch;
+    const along = rnd.range(-half + 20, half - 20);
+    const w = rnd.range(4, 10), d = rnd.range(4, 10), h = rnd.range(3, 9);
+    const off = rnd.range(-(hs - Math.max(w, d) / 2 - 2), hs - Math.max(w, d) / 2 - 2);
+    const [x, z] = rnd.chance(0.5) ? [c + off, along] : [along, c + off];
+    if (Math.abs(x) < hs + 8 || Math.abs(z) < hs + 8) continue;  // keep the central cross clear
+    if (spawns.some((sp) => Math.hypot(sp.pos.x - x, sp.pos.z - z) < 40)) continue;
+    const box = { min: [x - w / 2, 0, z - d / 2], max: [x + w / 2, h, z + d / 2], tag: 'rock', tint: rnd.int(4), seed: rnd.int(1000) };
+    const clear = statics.every((s) => box.max[0] + 3 <= s.min[0] || box.min[0] - 3 >= s.max[0] || box.max[2] + 3 <= s.min[2] || box.min[2] - 3 >= s.max[2] || box.min[1] >= s.max[1]);
+    if (!clear) continue;
+    statics.push(box);
+    placed++;
+  }
 }
 
 // Highway dimensions (metres).

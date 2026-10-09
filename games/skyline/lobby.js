@@ -22,11 +22,12 @@ export function createLobby({ socket, loadout, onChange, onStart, onPeerLeft, on
     seat: 0,
     peerLoadout: null, peerReady: false, myReady: false, peerVersion: '', peerGame: '',
     againMe: false, againPeer: false,
+    stage: 'city', peerStage: '',    // the host's stage choice (seat 1 decides)
   };
   let poll = 0;
   const change = () => { if (onChange) onChange(st); };
   const resetPeer = () => { st.peerLoadout = null; st.peerReady = false; st.myReady = false; st.againMe = false; st.againPeer = false; st.peerVersion = ''; st.peerGame = ''; };
-  const sendHi = () => socket.send({ t: 'hi', game: GAME.id, version: GAME.version, loadout: { ...loadout } });
+  const sendHi = () => socket.send({ t: 'hi', game: GAME.id, version: GAME.version, loadout: { ...loadout }, stage: st.stage });
   const isHost = () => st.seat === 1;
   const loadouts = () => ({ 1: isHost() ? { ...loadout } : { ...st.peerLoadout }, 2: isHost() ? { ...st.peerLoadout } : { ...loadout } });
 
@@ -36,18 +37,18 @@ export function createLobby({ socket, loadout, onChange, onStart, onPeerLeft, on
     return res.json();
   }
 
-  function begin(seed, lo) {
+  function begin(seed, lo, stage) {
     st.phase = 'battle';
     st.myReady = st.peerReady = false;
     st.againMe = st.againPeer = false;
     change();
-    if (onStart) onStart({ seed, loadouts: lo, seat: st.seat });
+    if (onStart) onStart({ seed, loadouts: lo, seat: st.seat, stage });
   }
   function hostStart() {
     const seed = 1 + Math.floor(random() * 2147483000);
     const lo = loadouts();
-    socket.send({ t: 'start', seed, loadouts: lo });
-    begin(seed, lo);
+    socket.send({ t: 'start', seed, loadouts: lo, stage: st.stage });
+    begin(seed, lo, st.stage);
   }
   function toLobby() {
     st.phase = 'lobby';
@@ -103,7 +104,9 @@ export function createLobby({ socket, loadout, onChange, onStart, onPeerLeft, on
       st.phase = 'idle';
       change();
     },
-    pickChanged() { if (socket.connected && st.phase !== 'waiting') { socket.send({ t: 'pick', loadout: { ...loadout } }); if (st.myReady) lobby.setReady(false); } },
+    pickChanged() { if (socket.connected && st.phase !== 'waiting') { socket.send({ t: 'pick', loadout: { ...loadout }, stage: st.stage }); if (st.myReady) lobby.setReady(false); } },
+    // The host's stage choice; sent with the next pick.
+    setStage(id) { st.stage = id; if (isHost()) lobby.pickChanged(); },
     setReady(on) {
       st.myReady = !!on;
       socket.send({ t: 'ready', on: st.myReady });
@@ -151,17 +154,18 @@ export function createLobby({ socket, loadout, onChange, onStart, onPeerLeft, on
         }
         case 'hi':
           st.peerLoadout = m.loadout || { weapon: 'normal', armor: 'normal' };
+          if (!isHost() && m.stage) st.peerStage = m.stage;
           st.peerVersion = m.version || '';
           st.peerGame = m.game || '';
           if (st.peerGame && st.peerGame !== GAME.id) st.note = '對方開的是另一款遊戲，無法對戰。';
           else if (st.peerVersion && st.peerVersion !== GAME.version) st.note = `對方的版本是 ${st.peerVersion}，這裡是 ${GAME.version}；版本不同可能會不同步。`;
           break;
-        case 'pick': st.peerLoadout = m.loadout || st.peerLoadout; if (st.peerReady) st.peerReady = false; break;
+        case 'pick': st.peerLoadout = m.loadout || st.peerLoadout; if (!isHost() && m.stage) st.peerStage = m.stage; if (st.peerReady) st.peerReady = false; break;
         case 'ready':
           st.peerReady = !!m.on;
           if (isHost() && st.myReady && st.peerReady && st.peerLoadout && st.phase === 'lobby') { change(); hostStart(); return true; }
           break;
-        case 'start': if (!isHost() && m.loadouts) begin(m.seed, m.loadouts); return true;
+        case 'start': if (!isHost() && m.loadouts) begin(m.seed, m.loadouts, m.stage); return true;
         case 'again':
           st.againPeer = true;
           if (isHost() && st.againMe && st.peerLoadout) { change(); hostStart(); return true; }

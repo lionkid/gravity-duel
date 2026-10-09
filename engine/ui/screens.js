@@ -27,10 +27,26 @@ export function createScreens(root, { onChange } = {}) {
   });
 
   const focusables = () => [...root.querySelectorAll('button:not([disabled]), input')];
+  // Moves the focus to the next (dir 1) or previous (dir -1) control; also what a gamepad drives.
+  function moveFocus(dir) {
+    if (!current) return;
+    const items = focusables();
+    if (!items.length) return;
+    const i = items.indexOf(document.activeElement);
+    const next = i < 0 ? (dir > 0 ? 0 : items.length - 1) : (i + dir + items.length) % items.length;
+    items[next].focus({ preventScroll: true });
+  }
+  function activate() {
+    if (!current) return;
+    const el = document.activeElement;
+    if (el && root.contains(el) && el.tagName === 'BUTTON') el.click();
+    else { const first = root.querySelector('.primary:not([disabled])') || root.querySelector('button:not([disabled])'); if (first) first.click(); }
+  }
+  function escape() { if (current && current.actions.escape) current.actions.escape(); }
   window.addEventListener('keydown', (e) => {
     if (!current) return;
     if (e.code === 'Escape') {
-      if (current.actions.escape) { e.preventDefault(); current.actions.escape(); }
+      if (current.actions.escape) { e.preventDefault(); escape(); }
       return;
     }
     const hot = current.view.keys && current.view.keys[e.code];
@@ -38,11 +54,7 @@ export function createScreens(root, { onChange } = {}) {
     if (e.target && e.target.tagName === 'INPUT') return;           // sliders use the arrows themselves
     const dir = e.code === 'ArrowDown' || e.code === 'KeyS' ? 1 : e.code === 'ArrowUp' || e.code === 'KeyW' ? -1 : 0;
     if (!dir) return;
-    const items = focusables();
-    if (!items.length) return;
-    const i = items.indexOf(document.activeElement);
-    const next = i < 0 ? (dir > 0 ? 0 : items.length - 1) : (i + dir + items.length) % items.length;
-    items[next].focus({ preventScroll: true });
+    moveFocus(dir);
     e.preventDefault();
   });
 
@@ -94,6 +106,7 @@ export function createScreens(root, { onChange } = {}) {
     back() { if (stack.length) stack.pop(); render(); },
     hide() { stack.length = 0; render(); },
     refresh() { render(); },
+    moveFocus, activate, escape,
     get name() { return current ? current.name : null; },
     get depth() { return stack.length; },
   };

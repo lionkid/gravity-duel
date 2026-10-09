@@ -115,8 +115,34 @@ await page.close();
   await p3.close();
 }
 
-// Postcard views (with bloom): the north ramp and deck from the street, and the skyline from above.
-for (const [name, q] of [['06-highway', 'pos=0,0,40&look=3.14159,-0.05'], ['07-skyline', 'pos=-60,180,120&look=0.6,-0.55']]) {
+// Touch controls on a touch device: the overlay shows during play, a tapped button fires the vulcan.
+{
+  const ctx = await browser.newContext({ hasTouch: true, viewport: { width: 1024, height: 600 } });
+  const pt = await ctx.newPage();
+  pt.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+  await pt.goto(`http://127.0.0.1:${port}/games/skyline/?seed=7&dummy=idle&bloom=0`, { timeout: 60000 });
+  await pt.waitForFunction(() => window.__skyline && window.__skyline.ui.name === 'title', null, { timeout: 30000 });
+  await pt.evaluate(() => { window.__skyline.settings.touch = 'on'; window.__skyline.touch.setMode('on'); window.__skyline.startBattle(); });
+  await pt.waitForFunction(() => window.__skyline.world.tick > 3 && !document.getElementById('touch').hidden, null, { timeout: 30000 });
+  const fired = await pt.evaluate(async () => {
+    const btn = document.querySelector('#touch [data-action="attack"]');
+    const r = btn.getBoundingClientRect();
+    const ev = (type) => new PointerEvent(type, { pointerType: 'touch', pointerId: 7, isPrimary: true, bubbles: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 });
+    btn.dispatchEvent(ev('pointerdown'));
+    const down = window.__skyline.touch.isDown('attack');
+    await new Promise((res) => setTimeout(res, 700));
+    const heat = window.__skyline.world.fighters[0].heat;
+    btn.dispatchEvent(ev('pointerup'));
+    return { down, heat: +heat.toFixed(2), shown: !document.getElementById('touch').hidden };
+  });
+  await pt.screenshot({ path: path.join(outDir, '15-touch.png') });
+  console.log('  saved 15-touch.png; touch attack:', fired);
+  if (!fired.down || !(fired.heat > 0)) errors.push(`touch attack did not fire (${JSON.stringify(fired)})`);
+  await ctx.close();
+}
+
+// Postcard views (with bloom): the north ramp and deck from the street, the skyline from above, and the moon.
+for (const [name, q] of [['06-highway', 'pos=0,0,40&look=3.14159,-0.05'], ['07-skyline', 'pos=-60,180,120&look=0.6,-0.55'], ['13-moon', 'stage=moon&pos=0,0,40&look=3.14159,-0.02'], ['14-moon-sky', 'stage=moon&pos=-40,90,120&look=0.5,-0.3']]) {
   const p2 = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   p2.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   await p2.goto(`http://127.0.0.1:${port}/games/skyline/?seed=7&${q}`, { timeout: 60000 });

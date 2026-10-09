@@ -77,3 +77,22 @@ test('the centre is taller than the edge', () => {
   const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
   assert.ok(avg(near) > avg(far) + 20, `centre ${avg(near).toFixed(0)} m vs edge ${avg(far).toFixed(0)} m`);
 });
+
+test('the moon stage is low gravity with boulders in the streets, clear of everything else', () => {
+  const o = Object.assign({ seed: 11 }, STAGES.moon);
+  const m = generateCity(o);
+  assert.equal(m.id, 'moon'); assert.equal(m.theme, 'moon'); assert.equal(m.gravity, STAGES.moon.gravity);
+  assert.deepEqual(generateCity(o), m, 'deterministic');
+  const rocks = m.statics.filter((s) => s.tag === 'rock');
+  const others = m.statics.filter((s) => s.tag !== 'rock');
+  assert.ok(rocks.length >= o.rocks * 0.6, `${rocks.length} rocks placed of ${o.rocks}`);
+  for (const r of rocks) {
+    assert.ok(r.min[1] === 0 && r.max[1] <= 9.01, 'low enough to jump over, high enough to hide behind');
+    assert.ok(r.min[0] >= m.bounds.minX && r.max[0] <= m.bounds.maxX && r.min[2] >= m.bounds.minZ && r.max[2] <= m.bounds.maxZ, 'inside the fence');
+    assert.ok(!others.some((s) => overlaps(r, s)), 'clear of buildings, pillars and ramps');
+    for (const sp of m.spawns) assert.ok(Math.hypot((r.min[0] + r.max[0]) / 2 - sp.pos.x, (r.min[2] + r.max[2]) / 2 - sp.pos.z) > 30, 'away from the spawns');
+  }
+  for (let i = 0; i < rocks.length; i++) for (let j = i + 1; j < rocks.length; j++) assert.ok(!overlaps(rocks[i], rocks[j]), 'rocks apart');
+  const buildings = m.statics.filter((s) => s.tag === 'building');
+  for (const s of buildings) assert.ok(s.max[1] <= o.maxHeight, `low domes, got ${s.max[1]}`);
+});

@@ -78,8 +78,19 @@ export const COMBAT = {
 
 export const STAGES = {
   // dusk: the match starts in late afternoon (start, 0 = noon … 1 = night) and reaches night after toNight seconds.
-  city: { id: 'city', name: 'Skyline City', zh: '天際城', gravity: 32, blocks: 8, pitch: 120, street: 44, minHeight: 25, maxHeight: 130, stepHeight: 45, dusk: { start: 0.08, toNight: 150 } },
+  city: { id: 'city', name: 'Skyline City', zh: '天際城', desc: '傍晚到入夜的大城市：高樓、巷弄、高架道路', theme: 'city', gravity: 32, blocks: 8, pitch: 120, street: 44, minHeight: 25, maxHeight: 130, stepHeight: 45, dusk: { start: 0.08, toNight: 150 } },
+  // A third of the gravity: jumps go three times higher and falls are slow. Low domes and boulders for cover, the Earth overhead, always night.
+  moon: { id: 'moon', name: 'Mare Skyline', zh: '月面都市', desc: '重力只有三分之一，跳得高、落得慢；矮樓與巨石，地球掛在天上', theme: 'moon', gravity: 11, blocks: 8, pitch: 130, street: 56, minHeight: 12, maxHeight: 64, stepHeight: 22, rocks: 70, dusk: { start: 1, toNight: 1 } },
 };
+export const STAGE_ORDER = ['city', 'moon'];
+
+// Picture quality: bloom, the cap on the device pixel ratio (render resolution) and particle counts.
+export const QUALITY = {
+  low: { zh: '低', desc: '無光暈、1× 解析度、粒子減半', bloom: false, pixelRatio: 1, particles: 0.5 },
+  medium: { zh: '中', desc: '光暈、最高 1.5× 解析度', bloom: true, pixelRatio: 1.5, particles: 0.8 },
+  high: { zh: '高', desc: '光暈、原生解析度、全部粒子', bloom: true, pixelRatio: 3, particles: 1 },
+};
+export const QUALITY_ORDER = ['low', 'medium', 'high'];
 
 export const CAMERA = {
   tp: { distance: 44, pivotHeight: 14, radius: 2.5, fov: 55 },
@@ -98,22 +109,26 @@ export const PALETTES = {
   crimson: { armor: 0x7a2330, armor2: 0x2a1418, trim: 0xe8e2cf, glow: 0xff7a3d, dark: 0x1a1214 },
 };
 
-// Keyboard + mouse. Mouse0 / Mouse2 are the left and right buttons; WheelUp / WheelDown the wheel.
+// Keyboard + mouse + gamepad. Mouse0 / Mouse2 are the left and right buttons; WheelUp / WheelDown the
+// wheel; Pad:<button> a standard-mapping gamepad button (left stick moves, right stick looks). Touch
+// buttons are named after the actions themselves (see engine/input/touch.js).
 export const BINDINGS = {
   move: { forward: ['KeyW'], back: ['KeyS'], left: ['KeyA'], right: ['KeyD'] },
   look: { up: ['ArrowUp'], down: ['ArrowDown'], left: ['ArrowLeft'], right: ['ArrowRight'] },
   actions: {
-    boost: ['Space'],
-    attack: ['KeyJ', 'Mouse0'],
-    aim: ['KeyK', 'Mouse2'],
-    dash: ['KeyL', 'ShiftLeft', 'ShiftRight'],
-    guard: ['Semicolon', 'ControlLeft'],
-    lock: ['KeyF'],
-    rematch: ['KeyR'],
+    boost: ['Space', 'Pad:A'],
+    attack: ['KeyJ', 'Mouse0', 'Pad:RT'],
+    aim: ['KeyK', 'Mouse2', 'Pad:LT'],
+    dash: ['KeyL', 'ShiftLeft', 'ShiftRight', 'Pad:B'],
+    guard: ['Semicolon', 'ControlLeft', 'Pad:LB'],
+    lock: ['KeyF', 'Pad:RB'],
+    rematch: ['KeyR', 'Pad:X'],
     switch1: ['Digit1'], switch2: ['Digit2'], switch3: ['Digit3'],
-    switchNext: ['WheelDown', 'KeyE'], switchPrev: ['WheelUp', 'KeyQ'],
-    pause: ['Escape'],
+    switchNext: ['WheelDown', 'KeyE', 'Pad:Y'], switchPrev: ['WheelUp', 'KeyQ', 'Pad:Up'],
+    pause: ['Escape', 'Pad:Start'],
   },
+  pad: { lookRate: { yaw: 3.2, pitch: 2.2 }, deadzone: 0.18, curve: 1.6 },
+  touch: { lookSensitivity: 0.006, toggle: ['aim'] },
 };
 
 // Key hints shown on the start panel and in help; label → keys.
@@ -121,4 +136,6 @@ export const KEY_HINTS = [
   ['移動', 'W A S D'], ['鏡頭／準星', '滑鼠（或方向鍵）'], ['跳躍／噴射', 'Space（按住）'], ['衝刺', 'Shift / L'],
   ['攻擊', '左鍵 / J'], ['瞄準（第一人稱，遠程才能開火）', '右鍵 / K（按住）'], ['切換武器', '滾輪 / 1 2 3'],
   ['防禦', 'Ctrl / ;'], ['鎖定切換', 'F'], ['再戰', 'R'], ['暫停', 'Esc'],
+  ['手把', '左搖桿移動、右搖桿鏡頭、A 噴射、RT 攻擊、LT 瞄準、B 衝刺、LB 防禦、RB 鎖定、Y 切換、Start 暫停'],
+  ['觸控', '左半邊搖桿、右半邊拖曳鏡頭、右下按鈕（瞄準是切換式）'],
 ];

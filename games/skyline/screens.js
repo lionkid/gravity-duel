@@ -52,13 +52,14 @@ export function defineScreens(ui, ctx) {
       <div class="picker">
         ${pickerRow('weapon', CFG.WEAPON_CLASSES, '武裝', ctx.loadout.weapon)}
         ${pickerRow('armor', CFG.ARMORS, '裝甲', ctx.loadout.armor)}
+        ${pickerRow('stage', CFG.STAGES, '場景', ctx.stageId)}
       </div>
-      <p class="pickdesc">${esc(CFG.WEAPON_CLASSES[ctx.loadout.weapon].desc)}。${esc(CFG.ARMORS[ctx.loadout.armor].desc)}。</p>
+      <p class="pickdesc">${esc(CFG.WEAPON_CLASSES[ctx.loadout.weapon].desc)}。${esc(CFG.ARMORS[ctx.loadout.armor].desc)}。<br>${esc(CFG.STAGES[ctx.stageId].desc)}。</p>
       <p class="cpu">對手：${esc(loadoutText(ctx.cpuLoadout))} · ${esc(AI_LEVELS[ctx.cpuLevel].zh)} ${btn('reroll', '換一組', { cls: 'small' })}</p>
       ${note(ctx.note)}
       <div class="row-end">${btn('back', '返回')}${btn('start', '開始對戰', { cls: 'primary' })}</div>`),
     actions: {
-      opt: (d) => { ctx.loadout[d.kind] = d.id; ctx.saveSettings(); ctx.sfx.play('menuMove'); ui.refresh(); },
+      opt: (d) => { if (d.kind === 'stage') ctx.setStage(d.id); else ctx.loadout[d.kind] = d.id; ctx.saveSettings(); ctx.sfx.play('menuMove'); ui.refresh(); },
       reroll: () => { ctx.rerollCpu(); ctx.sfx.play('menuMove'); ui.refresh(); },
       start: () => { ctx.sfx.play('start'); ctx.startBattle(); },
       // Reached from the KO screen there is nothing underneath: go back to the title.
@@ -140,6 +141,8 @@ export function defineScreens(ui, ctx) {
             <p class="state">${peer ? '已準備' : '還在選…'}</p>
           </div>
         </div>
+        <div class="picker stagepick">${pickerRow('stage', CFG.STAGES, '場景', ctx.stageId, lan.seat !== 1 || me)}</div>
+        <p class="pickdesc">${esc(CFG.STAGES[ctx.stageId].desc)}${lan.seat === 1 ? '' : '（由主機選擇）'}</p>
         <p class="sub center">${both ? '雙方都準備好了，開始！' : '兩邊都按下準備就開始。主機是座位 1，比賽在它的電腦上計算。'}</p>`;
     }
     return {
@@ -149,7 +152,11 @@ export function defineScreens(ui, ctx) {
         ${note(lan.note)}
         <div class="row-end">${btn('leave', '離開房間')}</div>`),
       actions: {
-        opt: (d) => { if (lan.myReady) return; ctx.loadout[d.kind] = d.id; ctx.saveSettings(); ctx.lanPickChanged(); ctx.sfx.play('menuMove'); ui.refresh(); },
+        opt: (d) => {
+          if (lan.myReady) return;
+          if (d.kind === 'stage') { if (lan.seat === 1) ctx.setStage(d.id); } else { ctx.loadout[d.kind] = d.id; ctx.lanPickChanged(); }
+          ctx.saveSettings(); ctx.sfx.play('menuMove'); ui.refresh();
+        },
         ready: () => { ctx.sfx.play(lan.myReady ? 'menuBack' : 'menuOk'); ctx.lanReady(!lan.myReady); },
         leave: () => { ctx.sfx.play('menuBack'); ctx.lanLeave(); ui.replace('lan'); ctx.lanBrowse(); },
         escape: () => { ctx.sfx.play('menuBack'); ctx.lanLeave(); ui.replace('lan'); ctx.lanBrowse(); },
@@ -235,19 +242,27 @@ export function defineScreens(ui, ctx) {
       <div class="settings">
         <label for="sens">滑鼠靈敏度</label><input id="sens" type="range" min="0.3" max="2" step="0.1" value="${ctx.settings.sens}"><span class="val" data-for="sens">${ctx.settings.sens.toFixed(1)}×</span>
         <label for="vol">音量</label><input id="vol" type="range" min="0" max="1" step="0.05" value="${ctx.settings.volume}"><span class="val" data-for="vol">${Math.round(ctx.settings.volume * 100)}%</span>
-        <label for="bloom">光暈後製</label><input id="bloom" type="checkbox" ${ctx.settings.bloom ? 'checked' : ''}><span class="val" data-for="bloom">${ctx.settings.bloom ? '開' : '關'}</span>
+        <label>畫質</label><div class="seg">${CFG.QUALITY_ORDER.map((id) => `<button type="button" class="opt ${ctx.settings.quality === id ? 'on' : ''}" data-act="quality" data-id="${id}" title="${esc(CFG.QUALITY[id].desc)}">${CFG.QUALITY[id].zh}</button>`).join('')}</div><span class="val"></span>
+        <label for="inv">Y 軸反轉</label><input id="inv" type="checkbox" ${ctx.settings.invertY ? 'checked' : ''}><span class="val" data-for="inv">${ctx.settings.invertY ? '開' : '關'}</span>
+        <label for="fps">顯示 FPS</label><input id="fps" type="checkbox" ${ctx.settings.fps ? 'checked' : ''}><span class="val" data-for="fps">${ctx.settings.fps ? '開' : '關'}</span>
+        <label>觸控按鈕</label><div class="seg">${[['auto', '自動'], ['on', '開'], ['off', '關']].map(([id, zh]) => `<button type="button" class="opt ${ctx.settings.touch === id ? 'on' : ''}" data-act="touch" data-id="${id}">${zh}</button>`).join('')}</div><span class="val"></span>
       </div>
-      <p class="foot">設定會保存在這個瀏覽器。</p>
+      <p class="foot">畫質「${esc(CFG.QUALITY[ctx.settings.quality].zh)}」：${esc(CFG.QUALITY[ctx.settings.quality].desc)}。${ctx.padConnected ? '已偵測到手把。' : '手把插上就能用。'}設定會保存在這個瀏覽器。</p>
       <div class="row-end">${btn('back', '返回')}</div>`),
-    actions: { back, escape: back },
+    actions: {
+      back, escape: back,
+      quality: (d) => { ctx.settings.quality = d.id; ctx.applySettings(); ctx.saveSettings(); ctx.sfx.play('menuMove'); ui.refresh(); },
+      touch: (d) => { ctx.settings.touch = d.id; ctx.applySettings(); ctx.saveSettings(); ctx.sfx.play('menuMove'); ui.refresh(); },
+    },
     mount(root) {
-      const sens = root.querySelector('#sens'), vol = root.querySelector('#vol'), bloom = root.querySelector('#bloom');
+      const sens = root.querySelector('#sens'), vol = root.querySelector('#vol'), inv = root.querySelector('#inv'), fps = root.querySelector('#fps');
       const show = (id, text) => { root.querySelector(`[data-for="${id}"]`).textContent = text; };
       const changed = () => { ctx.applySettings(); ctx.saveSettings(); };
       sens.addEventListener('input', () => { ctx.settings.sens = Number(sens.value); show('sens', `${ctx.settings.sens.toFixed(1)}×`); changed(); });
       vol.addEventListener('input', () => { ctx.settings.volume = Number(vol.value); show('vol', `${Math.round(ctx.settings.volume * 100)}%`); changed(); });
       vol.addEventListener('change', () => ctx.sfx.play('menuMove'));
-      bloom.addEventListener('change', () => { ctx.settings.bloom = bloom.checked; show('bloom', bloom.checked ? '開' : '關'); changed(); });
+      inv.addEventListener('change', () => { ctx.settings.invertY = inv.checked; show('inv', inv.checked ? '開' : '關'); changed(); });
+      fps.addEventListener('change', () => { ctx.settings.fps = fps.checked; show('fps', fps.checked ? '開' : '關'); changed(); });
     },
   }));
 }
