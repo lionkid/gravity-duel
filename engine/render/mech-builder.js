@@ -6,6 +6,7 @@
 //   shape  'box' [w, h, d] | 'cyl' [rTop, rBottom, h, segments] | 'cone' [r, h, segments] | 'sphere' [r, segments] | 'group'
 //   mat    palette key; 'glow' parts are emissive (bloom picks them up)
 //   mirror true builds the part twice, mirrored in x; names get an 'R' (x > 0) or 'L' suffix
+//   only   'R' | 'L': inside a mirrored part, build this child on that side only (a weapon in one hand)
 //
 // Named nodes are collected in `nodes` with their rest pose in `rest`, which the animator uses.
 // Models face -Z, matching the simulation's yaw convention, so group.rotation.y = fighter.yaw.
@@ -65,7 +66,10 @@ export function buildMech(design, options = {}) {
       nodes.set(name, obj);
       rest.set(name, { pos: obj.position.clone(), rot: obj.rotation.clone(), scale: obj.scale.clone() });
     }
-    for (const child of part.children || []) addChild(child, obj, sx, suffix);
+    for (const child of part.children || []) {
+      if (child.only && child.only !== (sx > 0 ? 'R' : 'L')) continue;
+      addChild(child, obj, sx, suffix);
+    }
     return obj;
   }
   function addChild(part, parent, sx, suffix) {

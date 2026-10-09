@@ -8,40 +8,91 @@
 <link rel="icon" href="../../assets/icon.png">
 <link href="https://fonts.googleapis.com/css2?family=Russo+One&family=Noto+Sans+TC:wght@400;500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
 <style>
+  /* One deliberate dark theme: a night city. Colours are tokens; the game paints everything else. */
   :root {
-    --bg: #0a0d18; --fg: #e8ecf5; --muted: #8e97ad; --accent: #58e0ff; --gold: #d9b24c; --warn: #ff7a3d;
-    --panel: rgba(9, 12, 22, 0.82); --line: rgba(142, 151, 173, 0.25);
-    color-scheme: dark;            /* a night city: one deliberate dark theme */
+    --bg: #0a0d18; --fg: #e8ecf5; --muted: #8e97ad; --accent: #58e0ff; --gold: #d9b24c; --warn: #ff7a3d; --hot: #ff4b4b; --enemy: #ff6b6b;
+    --panel: rgba(9, 12, 22, 0.84); --line: rgba(142, 151, 173, 0.25);
+    --display: 'Russo One', 'Noto Sans TC', sans-serif; --body: 'Noto Sans TC', system-ui, sans-serif; --mono: 'Share Tech Mono', ui-monospace, monospace;
+    color-scheme: dark;
   }
-  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font-family: 'Noto Sans TC', system-ui, sans-serif; overflow: hidden; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font-family: var(--body); overflow: hidden; }
   #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
   body.playing #game { cursor: none; }
 
-  #hud { position: fixed; inset: 0; pointer-events: none; }
-  .gauges { position: absolute; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 6px; width: min(300px, 50vw); }
-  .gauge { display: grid; grid-template-columns: 52px 1fr; align-items: center; gap: 8px; font: 12px 'Share Tech Mono', monospace; letter-spacing: 0.08em; color: var(--muted); }
+  #hud { position: fixed; inset: 0; pointer-events: none; font-variant-numeric: tabular-nums; }
+  .gauge { display: grid; grid-template-columns: 56px 1fr; align-items: center; gap: 8px; font: 12px var(--mono); letter-spacing: 0.08em; color: var(--muted); }
   .gauge .bar { height: 8px; background: rgba(255, 255, 255, 0.08); border: 1px solid var(--line); border-radius: 2px; overflow: hidden; }
   .gauge .bar i { display: block; height: 100%; width: 100%; background: var(--accent); transition: width 0.08s linear; }
   .gauge[data-state="low"] .bar i { background: var(--warn); }
-  .debug { position: absolute; left: 16px; top: 12px; font: 12px 'Share Tech Mono', monospace; color: var(--muted); white-space: pre; text-shadow: 0 1px 2px #000; }
-  .crosshair { position: absolute; left: 50%; top: 50%; width: 26px; height: 26px; margin: -13px 0 0 -13px; opacity: 0; transition: opacity 0.15s; }
-  .crosshair.on { opacity: 1; }
-  .crosshair::before, .crosshair::after { content: ''; position: absolute; background: var(--accent); box-shadow: 0 0 6px var(--accent); }
-  .crosshair::before { left: 12px; top: 0; width: 2px; height: 26px; }
-  .crosshair::after { top: 12px; left: 0; width: 26px; height: 2px; }
+  .gauge[data-state="hot"] .bar i { background: var(--hot); }
+  .gauge.heat .bar i { background: var(--gold); }
 
-  #overlay { position: fixed; inset: 0; display: grid; place-items: center; background: radial-gradient(ellipse at center, rgba(10, 13, 24, 0.55), rgba(10, 13, 24, 0.9)); cursor: pointer; }
+  .top { position: absolute; left: 16px; top: calc(14px + env(safe-area-inset-top, 0px)); width: min(360px, 46vw); }
+  .me .name { font: 18px var(--display); letter-spacing: 0.08em; }
+  .me .loadout { color: var(--muted); font-size: 12px; margin: 2px 0 6px; }
+  .me .gauge.hp { grid-template-columns: 28px 1fr; }
+  .me .gauge.hp .bar { height: 14px; }
+  .me .gauge.hp .bar i { background: linear-gradient(90deg, #3ec9ff, var(--accent)); }
+  .me .gauge.hp[data-state="low"] .bar i { background: var(--warn); }
+
+  .gauges { position: absolute; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 6px; width: min(300px, 46vw); }
+
+  .weapons { position: absolute; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 6px; --cd: 0; }
+  .slot { display: grid; grid-template-columns: 22px 1fr; align-items: center; gap: 8px; min-width: 150px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 4px; background: rgba(9, 12, 22, 0.6); color: var(--muted); font-size: 13px; position: relative; overflow: hidden; }
+  .slot .key { font: 12px var(--mono); color: var(--muted); }
+  .slot.active { border-color: var(--accent); color: var(--fg); box-shadow: 0 0 10px rgba(88, 224, 255, 0.25) inset; }
+  .weapons.cooling .slot::after { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: calc(var(--cd) * 100%); background: rgba(255, 255, 255, 0.08); }
+
+  .enemy, .reticle, .lost, .crosshair, .hitmark { position: absolute; left: 0; top: 0; opacity: 0; transition: opacity 0.15s; will-change: transform; }
+  .enemy.on, .reticle.on, .lost.on, .crosshair.on, .hitmark.on { opacity: 1; }
+  .enemy { width: 150px; margin: -36px 0 0 -75px; text-align: center; }
+  .enemy .name { font-size: 11px; color: var(--muted); white-space: nowrap; text-shadow: 0 1px 2px #000; }
+  .enemy .gauge { grid-template-columns: 1fr; }
+  .enemy .gauge .label { display: none; }
+  .enemy .gauge .bar { height: 7px; border-color: rgba(255, 107, 107, 0.4); }
+  .enemy .gauge .bar i { background: var(--enemy); }
+  .enemy .gauge[data-state="low"] .bar i { background: var(--warn); }
+  .reticle { width: 56px; height: 56px; margin: -28px 0 0 -28px; border: 2px solid rgba(88, 224, 255, 0.85); border-radius: 50%; box-shadow: 0 0 8px rgba(88, 224, 255, 0.5); display: grid; place-items: end center; }
+  .reticle span { font: 10px var(--mono); letter-spacing: 0.2em; color: var(--accent); transform: translateY(16px); }
+  .lost { width: 0; height: 0; border: 12px solid transparent; border-left: 22px solid var(--warn); margin: -12px 0 0 0; filter: drop-shadow(0 0 4px rgba(255, 122, 61, 0.7)); }
+  .crosshair { left: 50%; top: 50%; width: 30px; height: 30px; margin: -15px 0 0 -15px; }
+  .crosshair::before, .crosshair::after { content: ''; position: absolute; background: var(--accent); box-shadow: 0 0 6px var(--accent); transition: background 0.1s; }
+  .crosshair::before { left: 14px; top: 0; width: 2px; height: 30px; }
+  .crosshair::after { top: 14px; left: 0; width: 30px; height: 2px; }
+  .crosshair:not(.ready)::before, .crosshair:not(.ready)::after { background: var(--muted); box-shadow: none; }
+  .hitmark { left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; transform: rotate(45deg); border: 2px solid #fff; border-top: 0; border-left: 0; transition: none; }
+  .vignette { position: absolute; inset: 0; opacity: 0; background: radial-gradient(ellipse at center, transparent 55%, rgba(255, 60, 40, 0.55)); transition: opacity 0.1s; }
+  .msg { position: absolute; left: 50%; top: 30%; transform: translateX(-50%); font: 20px var(--display); letter-spacing: 0.2em; color: var(--gold); text-shadow: 0 0 12px rgba(217, 178, 76, 0.6); opacity: 0; transition: opacity 0.2s; }
+  .msg.on { opacity: 1; }
+  .ko { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); text-align: center; opacity: 0; transition: opacity 0.4s; }
+  .ko.on { opacity: 1; }
+  .ko .result { font: 72px var(--display); letter-spacing: 0.2em; color: var(--accent); text-shadow: 0 0 24px rgba(88, 224, 255, 0.6); }
+  .ko.lose .result { color: var(--enemy); text-shadow: 0 0 24px rgba(255, 107, 107, 0.6); }
+  .ko .hint { color: var(--muted); font-size: 14px; letter-spacing: 0.1em; }
+  .debug { position: absolute; left: 16px; top: calc(96px + env(safe-area-inset-top, 0px)); font: 12px var(--mono); color: var(--muted); white-space: pre; text-shadow: 0 1px 2px #000; }
+
+  #overlay { position: fixed; inset: 0; display: grid; place-items: center; background: radial-gradient(ellipse at center, rgba(10, 13, 24, 0.55), rgba(10, 13, 24, 0.9)); cursor: pointer; overflow: auto; }
   #overlay.hidden { display: none; }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 24px 28px; width: min(440px, calc(100vw - 32px)); box-sizing: border-box; backdrop-filter: blur(6px); }
-  .panel h1 { font: 34px 'Russo One', sans-serif; margin: 0; letter-spacing: 0.06em; color: var(--fg); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 22px 26px; width: min(520px, calc(100vw - 32px)); box-sizing: border-box; backdrop-filter: blur(6px); }
+  .panel h1 { font: 34px var(--display); margin: 0; letter-spacing: 0.06em; color: var(--fg); text-wrap: balance; }
   .panel h1 span { display: block; font-size: 18px; color: var(--accent); letter-spacing: 0.4em; margin-top: 2px; }
-  .panel .sub { color: var(--muted); margin: 10px 0 0; font-size: 14px; }
-  .panel .cta { margin: 18px 0 14px; font-size: 18px; color: var(--gold); }
-  .keys { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0; font-size: 13px; }
+  .panel .sub { color: var(--muted); margin: 8px 0 0; font-size: 13px; }
+  .picker { display: grid; gap: 8px; margin: 14px 0 6px; }
+  .picker .row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .picker .rowlabel { color: var(--muted); font-size: 13px; width: 40px; }
+  .picker .opt { pointer-events: auto; cursor: pointer; font: 14px var(--body); color: var(--fg); background: rgba(255, 255, 255, 0.04); border: 1px solid var(--line); border-radius: 4px; padding: 6px 12px; }
+  .picker .opt:hover { border-color: var(--muted); }
+  .picker .opt:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .picker .opt.on { border-color: var(--accent); color: var(--accent); background: rgba(88, 224, 255, 0.08); }
+  .pickdesc { color: var(--muted); font-size: 12px; margin: 0 0 4px; min-height: 2.4em; }
+  .cpu { color: var(--gold); font-size: 13px; margin: 0; }
+  .panel .cta { margin: 14px 0 12px; font-size: 18px; color: var(--gold); }
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; margin: 0; font-size: 12px; }
   .keys dt { color: var(--muted); }
-  .keys dd { margin: 0; font-family: 'Share Tech Mono', monospace; }
-  .panel .note { color: var(--warn); font-size: 13px; min-height: 1em; margin: 12px 0 0; }
-  @media (max-width: 480px) { .panel h1 { font-size: 26px; } .gauges { width: 50vw; } }
+  .keys dd { margin: 0; font-family: var(--mono); }
+  .panel .note { color: var(--warn); font-size: 13px; min-height: 1em; margin: 10px 0 0; }
+  @media (max-width: 480px) { .panel h1 { font-size: 26px; } .top, .gauges { width: 46vw; } .slot { min-width: 110px; } }
+  @media (prefers-reduced-motion: reduce) { .enemy, .reticle, .lost, .crosshair, .ko, .msg { transition: none; } }
 </style>
 <script type="importmap">
 { "imports": { "three": "../../vendor/three/three.module.js", "three-addons": "../../vendor/three/addons.js" } }
@@ -49,15 +100,14 @@
 </head>
 <body>
 <canvas id="game"></canvas>
-<div id="hud">
-  <div class="gauges"></div>
-  <div class="debug"></div>
-  <div class="crosshair"></div>
-</div>
+<div id="hud"></div>
 <div id="overlay">
   <div class="panel">
     <h1>GRAVITY DUEL<span>SKYLINE</span></h1>
-    <p class="sub">M0 骨架：城市、移動、鏡頭。F3 顯示除錯資訊。</p>
+    <p class="sub">M2：選好武裝與裝甲，點一下開始。火神砲是預設武器，1 / 2 / 3 切換，按住右鍵用遠程武器瞄準。</p>
+    <div class="picker"></div>
+    <p class="pickdesc"></p>
+    <p class="cpu"></p>
     <p class="cta">點一下開始</p>
     <dl class="keys"></dl>
     <p class="note"></p>

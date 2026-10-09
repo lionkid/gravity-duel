@@ -215,8 +215,9 @@ function buildBuildings(list, pal) {
             // Far away the grid is finer than a pixel: fade to its average glow instead of shimmering.
             float far = smoothstep(0.3, 1.2, max(fw.x, fw.y));
             float avgWin = 0.6 * 0.56;
-            vec3 avgGlow = mix(warm, cool, 0.14) * 0.4 * avgWin;
-            totalEmissiveRadiance += mix(wc * on * win, avgGlow, far) * 1.5;
+            vec3 avgGlow = mix(warm, cool, 0.14) * 0.3 * avgWin;
+            // Just under the bloom threshold: windows read as lit without hazing the whole frame.
+            totalEmissiveRadiance += mix(wc * on * win, avgGlow, far) * 0.95;
             diffuseColor.rgb *= 1.0 - mix(win, avgWin, far) * 0.6;
           } else {
             // Roofs: a thin lit edge so building tops read against the dark sky.

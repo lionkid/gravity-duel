@@ -95,7 +95,7 @@ function buildHighway(o, statics, ramps, lamps, lanes) {
   for (let v = -R; v <= R; v += HW.pillarEvery) {
     for (const [x, z] of [[v, R], [v, -R], [R, v], [-R, v]]) {
       const key = `${x},${z}`;
-      if (seen.has(key) || Math.abs(x) < 20 && Math.abs(z) < R || Math.abs(z) < 20 && Math.abs(x) < R) continue;
+      if (seen.has(key) || Math.abs(x) < 20 && Math.abs(z) <= R || Math.abs(z) < 20 && Math.abs(x) <= R) continue;
       seen.add(key);
       statics.push({ min: [x - HW.pillar / 2, 0, z - HW.pillar / 2], max: [x + HW.pillar / 2, bottom, z + HW.pillar / 2], tag: 'pillar' });
     }

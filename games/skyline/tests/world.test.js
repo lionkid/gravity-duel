@@ -33,6 +33,8 @@ test('two fighters start on their spawns facing each other', () => {
 test('running reaches top speed quickly and turns the body toward the movement', () => {
   const w = world();
   const z0 = w.fighters[0].pos.z;
+  // Lock-on would keep the body facing the opponent, so switch it off first (F toggles it).
+  run(w, 2, (it, i) => { it.pressed.lock = i === 0; });
   // Down the central street (-z), then back up it (+z): the body turns to face each way.
   const f = run(w, 120, (it) => { it.move.z = -1; });
   assert.ok(Math.abs(Math.hypot(f.vel.x, f.vel.z) - MOVE.run) < 1e-6, `top speed, got ${Math.hypot(f.vel.x, f.vel.z)}`);
@@ -131,6 +133,7 @@ test('a mech runs up a ramp onto the highway and all the way around the loop', (
 test('the fence stops a fighter at the edge of the arena', () => {
   // Down the central street, over the south ramp and deck, off its far edge and on to the fence.
   const w = world();
+  w.fighters[1].pos.z = 300;                 // the opponent out of the way (fighters push each other apart)
   const f = run(w, 60 * 30, (it) => { it.move.z = -1; });
   assert.equal(f.pos.z, w.stage.bounds.minZ + 5);
   assert.ok(f.onGround && f.pos.y === 0);

@@ -34,6 +34,10 @@ export const AX01 = {
       { shape: 'box', size: [1.6, 1.6, 0.6], pos: [0, 3.0, -2.7], mat: 'glow' },              // core
       { shape: 'box', size: [0.4, 3.6, 0.3], pos: [1.6, 3.4, -2.7], mat: 'glow', mirror: true },  // seams
       { shape: 'box', size: [8.4, 1.2, 5.2], pos: [0, 6.4, 0], mat: 'armor2' },               // collar
+      { name: 'vulcan', shape: 'group', pos: [0, 4.6, -2.6], children: [                             // chest vulcans
+        { shape: 'cyl', size: [0.3, 0.3, 1.2, 8], pos: [3.0, 0, 0], rot: [Math.PI / 2, 0, 0], mat: 'dark', mirror: true },
+        { shape: 'cyl', size: [0.3, 0.3, 1.2, 8], pos: [3.0, -0.8, 0], rot: [Math.PI / 2, 0, 0], mat: 'dark', mirror: true },
+      ] },
       // Head.
       { name: 'head', shape: 'group', pos: [0, 7.2, -0.2], children: [
         { shape: 'cyl', size: [0.8, 0.8, 0.8, 8], pos: [0, 0.2, 0], mat: 'dark' },
@@ -56,6 +60,17 @@ export const AX01 = {
         { shape: 'box', size: [2.6, 3.8, 2.8], pos: [0, -6.8, -0.2], mat: 'armor' },          // forearm
         { shape: 'box', size: [2.8, 1.0, 3.0], pos: [0, -5.4, -0.2], mat: 'trim' },
         { shape: 'box', size: [1.8, 1.8, 1.8], pos: [0, -9.3, -0.3], mat: 'dark' },           // hand
+        // Weapons in the right hand; the animator shows the one in use.
+        { name: 'rifle', shape: 'group', pos: [0, -9.3, -0.3], only: 'R', children: [
+          { shape: 'box', size: [1.3, 1.6, 7.0], pos: [0, 0.2, -3.2], mat: 'armor2' },
+          { shape: 'cyl', size: [0.35, 0.35, 5.0, 8], pos: [0, 0.6, -8.5], rot: [Math.PI / 2, 0, 0], mat: 'dark' },
+          { shape: 'box', size: [0.6, 0.8, 2.0], pos: [0, 1.4, -2.0], mat: 'trim' },                 // sight
+          { shape: 'box', size: [0.5, 0.3, 1.2], pos: [0, 1.0, -7.4], mat: 'glow' },                  // muzzle lamp
+        ] },
+        { name: 'blade', shape: 'group', pos: [0, -9.3, -0.3], only: 'R', children: [
+          { shape: 'cyl', size: [0.45, 0.5, 2.2, 8], pos: [0, 0, 0], mat: 'trim' },                   // hilt
+          { shape: 'box', size: [0.5, 13, 1.6], pos: [0, -7.5, 0], mat: 'glow' },                     // the blade, hanging down at rest
+        ] },
       ] },
       // Backpack and thruster wings.
       { shape: 'box', size: [5.0, 4.2, 2.2], pos: [0, 4.0, 3.4], mat: 'armor2' },

@@ -7,7 +7,7 @@
 //   pressed actions that matter on the frame they go down (the rules buffer them for a short while)
 
 export const HELD = ['boost', 'attack', 'guard', 'aim'];
-export const PRESSED = ['boost', 'attack', 'dash', 'guard', 'lock', 'switch1', 'switch2', 'switch3', 'switchNext', 'switchPrev', 'pause'];
+export const PRESSED = ['boost', 'attack', 'dash', 'guard', 'lock', 'switch1', 'switch2', 'switch3', 'switchNext', 'switchPrev', 'pause', 'rematch'];
 
 export function createIntent() {
   const held = {}, pressed = {};

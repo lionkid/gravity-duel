@@ -27,7 +27,7 @@ const errors = [];
 page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') errors.push(`${m.type()}: ${m.text()}`); });
 page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
 const t0 = Date.now();
-await page.goto(`http://127.0.0.1:${port}/games/skyline/?seed=7&debug`);
+await page.goto(`http://127.0.0.1:${port}/games/skyline/?seed=7&debug&bloom=0`);
 await page.waitForFunction(() => window.__skyline && window.__skyline.world.tick > 5, null, { timeout: 30000 });
 console.log(`page ready in ${Date.now() - t0} ms`);
 const shot = async (name) => { await page.screenshot({ path: path.join(outDir, `${name}.png`) }); console.log(`  saved ${name}.png`); };
@@ -36,9 +36,28 @@ const state = () => page.evaluate(() => { const f = window.__skyline.world.fight
 await shot('01-title');
 await page.evaluate(() => window.__skyline.setPlaying(true));
 await page.keyboard.down('KeyW');
-await page.waitForTimeout(1500);
+await page.waitForTimeout(1200);
 await shot('02-running');
 console.log('  after running:', await state());
+await page.keyboard.up('KeyW');
+// Vulcan from the street: locked on, level with the opponent, in range.
+await page.keyboard.down('KeyJ');
+await page.waitForTimeout(1500);
+await shot('08-vulcan');
+await page.keyboard.up('KeyJ');
+console.log(`  opponent hp after vulcan: ${await page.evaluate(() => window.__skyline.world.fighters[1].hp)}`);
+// Beam from first person.
+await page.keyboard.press('Digit3');
+await page.waitForFunction(() => window.__skyline.world.fighters[0].switchTimer === 0 && window.__skyline.world.fighters[0].active === 'ranged', null, { timeout: 10000 });
+await page.keyboard.down('KeyK');
+await page.waitForTimeout(400);
+await page.keyboard.press('KeyJ');
+await page.waitForTimeout(200);
+await shot('09-beam');
+await page.waitForTimeout(600);
+await page.keyboard.up('KeyK');
+console.log(`  opponent hp after beam: ${await page.evaluate(() => window.__skyline.world.fighters[1].hp)}`);
+await page.keyboard.down('KeyW');
 await page.keyboard.down('Space');
 await page.waitForTimeout(1200);
 await shot('03-boosting');
@@ -55,11 +74,30 @@ await page.keyboard.up('KeyK');
 await page.waitForTimeout(2500);
 await shot('05-landed');
 console.log('  at the end:', await state());
-// Postcard views: the north ramp and deck from the street, and the skyline from above.
+// Melee up close on a fresh page.
+const fps = await page.evaluate(() => document.querySelector('#hud .debug').textContent.split(' fps')[0]);
+await page.close();
+{
+  const p3 = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  p3.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+  await p3.goto(`http://127.0.0.1:${port}/games/skyline/?seed=7&pos=0,0,-48&bloom=0`, { timeout: 60000 });
+  await p3.waitForFunction(() => window.__skyline && window.__skyline.world.tick > 3, null, { timeout: 30000 });
+  await p3.evaluate(() => window.__skyline.setPlaying(true));
+  await p3.keyboard.press('Digit1');
+  await p3.waitForFunction(() => window.__skyline.world.fighters[0].switchTimer === 0 && window.__skyline.world.fighters[0].active === 'melee', null, { timeout: 10000 });
+  await p3.keyboard.press('KeyJ');
+  await p3.waitForFunction(() => { const m = window.__skyline.world.fighters[0].melee; return m && (m.stage === 'active' || m.stage === 'recovery'); }, null, { timeout: 10000 }).catch(() => {});
+  await p3.screenshot({ path: path.join(outDir, '10-melee.png') });
+  console.log('  saved 10-melee.png');
+  console.log(`  opponent hp after melee: ${await p3.evaluate(() => window.__skyline.world.fighters[1].hp)}`);
+  await p3.close();
+}
+
+// Postcard views (with bloom): the north ramp and deck from the street, and the skyline from above.
 for (const [name, q] of [['06-highway', 'pos=0,0,40&look=3.14159,-0.05'], ['07-skyline', 'pos=-60,180,120&look=0.6,-0.55']]) {
   const p2 = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   p2.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
-  await p2.goto(`http://127.0.0.1:${port}/games/skyline/?seed=7&${q}`);
+  await p2.goto(`http://127.0.0.1:${port}/games/skyline/?seed=7&${q}`, { timeout: 60000 });
   await p2.waitForFunction(() => window.__skyline && window.__skyline.world.tick > 3, null, { timeout: 30000 });
   await p2.evaluate(() => window.__skyline.setPlaying(true));
   await p2.waitForTimeout(400);
@@ -67,8 +105,7 @@ for (const [name, q] of [['06-highway', 'pos=0,0,40&look=3.14159,-0.05'], ['07-s
   console.log(`  saved ${name}.png`);
   await p2.close();
 }
-const fps = await page.evaluate(() => document.querySelector('#hud .debug').textContent.split(' fps')[0]);
-console.log(`  headless fps ≈ ${fps} (SwiftShader; real GPUs are far faster)`);
+console.log(`  headless fps ≈ ${fps} without bloom (SwiftShader; real GPUs are far faster)`);
 console.log(errors.length ? `console problems:\n  ${errors.join('\n  ')}` : 'no console errors or warnings');
 await browser.close();
 server.close();

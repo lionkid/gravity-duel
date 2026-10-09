@@ -9,24 +9,26 @@ import { approachXZ, approachAngle, dirToYaw, yawToDir, wrapAngle } from '../../
 import { emit } from '../../../engine/core/events.js';
 import { IDLE_INTENT } from '../../../engine/input/intent.js';
 import { MOVE, BODY } from '../config.js';
+import { initCombat, stepLock, stepCombat, stepProjectiles, separateFighters, combatFacing, armorOf, rangedOf } from './combat.js';
 
 const BUFFERED = ['boost', 'dash', 'attack', 'lock', 'switch1', 'switch2', 'switch3', 'switchNext', 'switchPrev'];
 
-export function createWorld({ stage, seed = 1, players = 2 }) {
+// loadouts: { 1: { weapon, armor }, 2: { weapon, armor } }
+export function createWorld({ stage, seed = 1, players = 2, loadouts = {} }) {
   const world = {
-    tick: 0, time: 0, seed, stage, winner: 0,
+    tick: 0, time: 0, seed, stage, winner: 0, koTick: 0, nextId: 0,
     fighters: [], projectiles: [], events: [],
     rnd: makeRng(seed),
     statics: createStatics(stage),
   };
   for (let i = 0; i < players; i++) {
     const sp = stage.spawns[i % stage.spawns.length];
-    world.fighters.push(createFighter(i + 1, sp));
+    world.fighters.push(createFighter(i + 1, sp, loadouts[i + 1]));
   }
   return world;
 }
 
-export function createFighter(id, spawn) {
+export function createFighter(id, spawn, loadout) {
   const f = createBody({ x: spawn.pos.x, y: spawn.pos.y, z: spawn.pos.z, w: BODY.w, h: BODY.h, d: BODY.d });
   Object.assign(f, {
     id,
@@ -41,6 +43,7 @@ export function createFighter(id, spawn) {
     buf: {},
   });
   for (const a of BUFFERED) f.buf[a] = 0;
+  initCombat(f, loadout);
   return f;
 }
 
@@ -50,6 +53,8 @@ export function stepWorld(world, intents, dt) {
     const it = intents[i] || IDLE_INTENT;
     stepFighter(world, f, it, dt, g);
   });
+  stepProjectiles(world, dt);
+  separateFighters(world, dt);
   world.tick++;
   world.time += dt;
   return world;
@@ -60,18 +65,20 @@ function stepFighter(world, f, it, dt, g) {
   for (const a of BUFFERED) f.buf[a] = it.pressed[a] ? MOVE.inputBuffer : Math.max(0, f.buf[a] - dt);
   f.landLag = Math.max(0, f.landLag - dt);
   f.dashCd = Math.max(0, f.dashCd - dt);
-  const canAct = f.landLag <= 0 && f.hp > 0;
 
   f.aim.yaw = it.aim.yaw;
   f.aim.pitch = it.aim.pitch;
-  f.aiming = canAct && !!it.held.aim;
+  stepLock(world, f, it, dt);
+  const combat = stepCombat(world, f, it, dt);
+  const canAct = f.landLag <= 0 && !f.dead && f.stun <= 0 && f.guardBreak <= 0;
+  f.aiming = canAct && !!it.held.aim && !f.melee && !f.guard;
 
-  const mv = canAct ? it.move : IDLE_INTENT.move;
+  const mv = canAct && !combat.lockMove ? it.move : IDLE_INTENT.move;
   const moving = Math.hypot(mv.x, mv.z) > 0.05;
-  const speedMul = f.aiming ? MOVE.aimMoveMul : 1;
+  const speedMul = (f.aiming ? rangedOf(f).aimMoveMul : 1) * armorOf(f).speed;
 
   // Dash: a burst along the movement direction (or facing), hovering, paid for with fuel.
-  if (f.buf.dash > 0 && canAct && f.dashTimer <= 0 && f.dashCd <= 0 && f.fuel >= MOVE.dashFuel) {
+  if (f.buf.dash > 0 && canAct && !combat.lockMove && f.dashTimer <= 0 && f.dashCd <= 0 && f.fuel >= MOVE.dashFuel) {
     f.buf.dash = 0;
     f.dashTimer = MOVE.dashTime;
     f.dashCd = MOVE.dashCooldown + MOVE.dashTime;
@@ -84,7 +91,11 @@ function stepFighter(world, f, it, dt, g) {
     emit(world, 'dash', { id: f.id, x: f.pos.x, y: f.pos.y, z: f.pos.z });
   }
 
-  if (f.dashTimer > 0) {
+  if (combat.lunge) {
+    // A melee lunge carries the body straight at the target, hovering like a dash.
+    f.vel.x = combat.lunge.x; f.vel.z = combat.lunge.z; f.vel.y = 0;
+    f.boosting = false;
+  } else if (f.dashTimer > 0) {
     f.dashTimer = Math.max(0, f.dashTimer - dt);
     f.vel.x = f.dashDir.x * MOVE.dash;
     f.vel.z = f.dashDir.z * MOVE.dash;
@@ -102,14 +113,14 @@ function stepFighter(world, f, it, dt, g) {
       if (sp > MOVE.airMax) approachXZ(f.vel, f.vel.x / sp * MOVE.airMax, f.vel.z / sp * MOVE.airMax, MOVE.airBleed * dt);
     }
     // Jump on a fresh press from the ground; thrust while held in the air.
-    if (f.buf.boost > 0 && f.onGround && canAct) {
+    if (f.buf.boost > 0 && f.onGround && canAct && !combat.lockMove) {
       f.buf.boost = 0;
       f.vel.y = MOVE.jump;
       f.onGround = false;
       f.fuelDelay = MOVE.fuelRegenDelay;
       emit(world, 'jump', { id: f.id });
     }
-    f.boosting = canAct && !!it.held.boost && !f.onGround && f.fuel > 0;
+    f.boosting = canAct && !combat.lockMove && !!it.held.boost && !f.onGround && f.fuel > 0;
     if (f.boosting) {
       f.vel.y = Math.min(MOVE.maxRise, f.vel.y + MOVE.boostAccel * dt);
       f.fuel = Math.max(0, f.fuel - dt);
@@ -118,8 +129,10 @@ function stepFighter(world, f, it, dt, g) {
     f.vel.y = Math.max(-MOVE.terminal, f.vel.y - g * dt);
   }
 
-  // Facing: toward the view while aiming, toward the movement otherwise.
+  // Facing: the view while aiming; the target while locked on or swinging; otherwise the movement.
+  const face = combatFacing(world, f, combat);
   if (f.aiming) f.yaw = approachAngle(f.yaw, f.aim.yaw, MOVE.aimTurnRate * dt);
+  else if (face != null && !f.dead) f.yaw = approachAngle(f.yaw, face, MOVE.turnRate * dt);
   else if (moving && f.dashTimer <= 0) f.yaw = approachAngle(f.yaw, dirToYaw(mv.x, mv.z), MOVE.turnRate * dt);
   else if (f.dashTimer > 0) f.yaw = approachAngle(f.yaw, dirToYaw(f.dashDir.x, f.dashDir.z), MOVE.turnRate * 2 * dt);
   f.yaw = wrapAngle(f.yaw);
@@ -146,5 +159,7 @@ export function fighterState(f) {
   return {
     id: f.id, pos: { ...f.pos }, vel: { ...f.vel }, yaw: f.yaw, aim: { ...f.aim }, onGround: f.onGround,
     hp: f.hp, fuel: f.fuel, boosting: f.boosting, aiming: f.aiming, dashTimer: f.dashTimer, landLag: f.landLag,
+    active: f.active, heat: f.heat, energy: f.energy, stun: f.stun, guard: f.guard, lock: f.lock, dead: f.dead,
+    melee: f.melee ? { ...f.melee } : null,
   };
 }
