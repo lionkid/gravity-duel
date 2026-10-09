@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gravity Duel: Skyline</title>
+<meta name="description" content="第三人稱 3D 機甲 1 對 1 對戰：城市、高速公路、樓頂。">
+<link rel="icon" href="../../assets/icon.png">
+<link href="https://fonts.googleapis.com/css2?family=Russo+One&family=Noto+Sans+TC:wght@400;500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0d18; --fg: #e8ecf5; --muted: #8e97ad; --accent: #58e0ff; --gold: #d9b24c; --warn: #ff7a3d;
+    --panel: rgba(9, 12, 22, 0.82); --line: rgba(142, 151, 173, 0.25);
+    color-scheme: dark;            /* a night city: one deliberate dark theme */
+  }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font-family: 'Noto Sans TC', system-ui, sans-serif; overflow: hidden; }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
+  body.playing #game { cursor: none; }
+
+  #hud { position: fixed; inset: 0; pointer-events: none; }
+  .gauges { position: absolute; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 6px; width: min(300px, 50vw); }
+  .gauge { display: grid; grid-template-columns: 52px 1fr; align-items: center; gap: 8px; font: 12px 'Share Tech Mono', monospace; letter-spacing: 0.08em; color: var(--muted); }
+  .gauge .bar { height: 8px; background: rgba(255, 255, 255, 0.08); border: 1px solid var(--line); border-radius: 2px; overflow: hidden; }
+  .gauge .bar i { display: block; height: 100%; width: 100%; background: var(--accent); transition: width 0.08s linear; }
+  .gauge[data-state="low"] .bar i { background: var(--warn); }
+  .debug { position: absolute; left: 16px; top: 12px; font: 12px 'Share Tech Mono', monospace; color: var(--muted); white-space: pre; text-shadow: 0 1px 2px #000; }
+  .crosshair { position: absolute; left: 50%; top: 50%; width: 26px; height: 26px; margin: -13px 0 0 -13px; opacity: 0; transition: opacity 0.15s; }
+  .crosshair.on { opacity: 1; }
+  .crosshair::before, .crosshair::after { content: ''; position: absolute; background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+  .crosshair::before { left: 12px; top: 0; width: 2px; height: 26px; }
+  .crosshair::after { top: 12px; left: 0; width: 26px; height: 2px; }
+
+  #overlay { position: fixed; inset: 0; display: grid; place-items: center; background: radial-gradient(ellipse at center, rgba(10, 13, 24, 0.55), rgba(10, 13, 24, 0.9)); cursor: pointer; }
+  #overlay.hidden { display: none; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 24px 28px; width: min(440px, calc(100vw - 32px)); box-sizing: border-box; backdrop-filter: blur(6px); }
+  .panel h1 { font: 34px 'Russo One', sans-serif; margin: 0; letter-spacing: 0.06em; color: var(--fg); }
+  .panel h1 span { display: block; font-size: 18px; color: var(--accent); letter-spacing: 0.4em; margin-top: 2px; }
+  .panel .sub { color: var(--muted); margin: 10px 0 0; font-size: 14px; }
+  .panel .cta { margin: 18px 0 14px; font-size: 18px; color: var(--gold); }
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0; font-size: 13px; }
+  .keys dt { color: var(--muted); }
+  .keys dd { margin: 0; font-family: 'Share Tech Mono', monospace; }
+  .panel .note { color: var(--warn); font-size: 13px; min-height: 1em; margin: 12px 0 0; }
+  @media (max-width: 480px) { .panel h1 { font-size: 26px; } .gauges { width: 50vw; } }
+</style>
+<script type="importmap">
+{ "imports": { "three": "../../vendor/three/three.module.js", "three-addons": "../../vendor/three/addons.js" } }
+</script>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+  <div class="gauges"></div>
+  <div class="debug"></div>
+  <div class="crosshair"></div>
+</div>
+<div id="overlay">
+  <div class="panel">
+    <h1>GRAVITY DUEL<span>SKYLINE</span></h1>
+    <p class="sub">M0 骨架：城市、移動、鏡頭。F3 顯示除錯資訊。</p>
+    <p class="cta">點一下開始</p>
+    <dl class="keys"></dl>
+    <p class="note"></p>
+  </div>
+</div>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

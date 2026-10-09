@@ -6,14 +6,19 @@
   "license": "UNLICENSED",
   "scripts": {
     "start": "node app/launcher.js",
+    "dev": "node server/lan-server.js",
     "server": "node server/lan-server.js",
-    "test": "for t in physics combat ai net balance lan-server; do node tests/$t.test.js || exit 1; done",
+    "test": "for t in physics combat ai net balance lan-server; do node tests/$t.test.js || exit 1; done && npm run test:skyline",
+    "test:skyline": "node --test \"engine/tests/*.test.js\" \"games/skyline/tests/*.test.js\"",
     "icon": "node tools/make-icon.mjs",
+    "vendor": "node tools/vendor-three.js",
     "build:win": "node tools/build-win.js",
     "build:mac": "node tools/build-mac.js"
   },
   "devDependencies": {
+    "esbuild": "^0.28.2",
     "postject": "^1.0.0-alpha.6",
-    "resedit": "^2.0.3"
+    "resedit": "^2.0.3",
+    "three": "^0.186.1"
   }
 }

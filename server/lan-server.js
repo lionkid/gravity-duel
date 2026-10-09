@@ -23,7 +23,7 @@ const DISCOVERY_PORT = 41234;           // UDP port every Gravity Duel server an
 const DISCOVERY_EVERY = 1000;           // ms between announcements
 const DISCOVERY_TTL = 3500;             // ms before a silent server drops off the list
 const TYPES = {
-  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8',
   '.json': 'application/json', '.md': 'text/markdown; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml',
 };
 
@@ -87,7 +87,7 @@ function startDiscovery(info) {
 function serveFile(req, res) {
   let url;
   try { url = decodeURIComponent(req.url.split('?')[0]); } catch (e) { res.writeHead(400); res.end(); return; }
-  if (url === '/') url = '/index.html';
+  if (url.endsWith('/')) url += 'index.html';   // directory URLs such as /games/skyline/
   const file = path.normalize(path.join(ROOT, url));
   // Stay inside the project and never serve dot-files such as .git.
   const rel = path.relative(ROOT, file);
