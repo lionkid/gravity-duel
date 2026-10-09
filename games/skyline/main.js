@@ -1,5 +1,6 @@
 // Gravity Duel: Skyline — wires the engine and the game together: city, two mechs, input, cameras,
-// HUD, effects. The simulation lives in rules/; everything here only reads it and feeds it Intents.
+// HUD, effects, sound and menus. The simulation lives in rules/; everything here only reads it and
+// feeds it Intents.
 
 import * as THREE from 'three';
 import { createLoop } from '../../engine/core/loop.js';
@@ -11,44 +12,57 @@ import { createMapper } from '../../engine/input/bindings.js';
 import { IDLE_INTENT, createIntent, clearIntent } from '../../engine/input/intent.js';
 import { createRenderApp } from '../../engine/render/app.js';
 import { createThirdPersonRig, createFirstPersonRig, createLockOnRig, createCameraBlender, createShake } from '../../engine/render/rigs.js';
-import { buildStageVisual, setNightEnvironment } from '../../engine/render/world-builder.js';
+import { buildStageVisual, createEnvironments } from '../../engine/render/world-builder.js';
 import { buildMech } from '../../engine/render/mech-builder.js';
 import { animateMech } from '../../engine/render/mech-anim.js';
 import { createBar, el, project } from '../../engine/render/hud.js';
 import { createSky } from '../../engine/render/sky.js';
 import { createBlobShadow, createSparks, createSlashes, createProjectileView, createFlashes, createBladeTrail } from '../../engine/render/fx.js';
 import { createPost } from '../../engine/render/post.js';
+import { createSynth } from '../../engine/audio/synth.js';
+import { createScreens } from '../../engine/ui/screens.js';
 import * as CFG from './config.js';
 import { generateCity } from './stages/city.js';
 import { createWorld, stepWorld } from './rules/world.js';
 import { weaponIn, meleeOf, rangedOf } from './rules/combat.js';
 import { AX01, withPalette } from './mechs/ax01.js';
+import { createAI, aiIntent, AI_LEVELS } from './ai/brain.js';
+import { RECIPES, soundForEvent, updateThrusterLoops } from './sound.js';
+import { defineScreens } from './screens.js';
 
 const params = new URLSearchParams(location.search);
 const seed = Number(params.get('seed')) || 7;
 const pick = (table, value, fallback) => (value && table[value] ? value : fallback);
+const load = (key, fallback) => { try { return Object.assign(fallback, JSON.parse(localStorage.getItem(key) || 'null') || {}); } catch (e) { return fallback; } };
+const save = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* private mode */ } };
 
-// Loadouts: the player's from the URL, then the last choice saved in this browser, then the defaults.
-// The opponent's comes from the URL or the seed.
-let stored = null;
-try { stored = JSON.parse(localStorage.getItem('skyline.loadout') || 'null'); } catch (e) { stored = null; }
+// Settings and the player's loadout live in this browser; the URL can override them (?weapon=&armor=&cpu=).
+const settings = load('skyline.settings', { sens: 1, volume: 0.5, bloom: true, cpu: 'normal' });
+settings.cpu = pick(AI_LEVELS, params.get('cpu') || settings.cpu, 'normal');
+const storedLoadout = load('skyline.loadout', {});
 const loadout = {
-  weapon: pick(CFG.WEAPON_CLASSES, params.get('weapon') || (stored && stored.weapon), 'normal'),
-  armor: pick(CFG.ARMORS, params.get('armor') || (stored && stored.armor), 'normal'),
+  weapon: pick(CFG.WEAPON_CLASSES, params.get('weapon') || storedLoadout.weapon, 'normal'),
+  armor: pick(CFG.ARMORS, params.get('armor') || storedLoadout.armor, 'normal'),
 };
+// The opponent's loadout comes from the URL, otherwise it is rolled from the seed (and rerolled on request).
 const wkeys = Object.keys(CFG.WEAPON_CLASSES), akeys = Object.keys(CFG.ARMORS);
-const cpuLoadout = {
-  weapon: pick(CFG.WEAPON_CLASSES, params.get('cpuWeapon'), wkeys[seed % 3]),
-  armor: pick(CFG.ARMORS, params.get('cpuArmor'), akeys[(seed >> 2) % 3]),
-};
+const cpuLoadout = { weapon: 'normal', armor: 'normal' };
+let cpuRoll = seed;
+function rollCpu() {
+  cpuLoadout.weapon = pick(CFG.WEAPON_CLASSES, params.get('cpuWeapon'), wkeys[cpuRoll % 3]);
+  cpuLoadout.armor = pick(CFG.ARMORS, params.get('cpuArmor'), akeys[(cpuRoll >> 2) % 3]);
+}
+rollCpu();
 const loadoutText = (l) => `${CFG.WEAPON_CLASSES[l.weapon].zh}武裝 · ${CFG.ARMORS[l.armor].zh}`;
+const todOverride = params.has('tod') ? Number(params.get('tod')) : null;
 
 // Stage and scene (built once; battles are restarted inside it).
 const stage = generateCity(Object.assign({ seed }, CFG.STAGES.city));
 const canvas = document.getElementById('game');
 const app = createRenderApp(canvas, { fov: CFG.CAMERA.tp.fov });
-setNightEnvironment(app.renderer, app.scene);
-buildStageVisual(app.scene, stage);
+const environments = createEnvironments(app.renderer);
+const dusk = CFG.STAGES.city.dusk;
+const stageVis = buildStageVisual(app.scene, stage, { environments, timeOfDay: dusk.start });
 const sky = createSky();
 app.scene.add(sky.mesh);
 const post = params.get('bloom') === '0' ? null : createPost(app, { strength: 0.42, radius: 0.3, threshold: 1.0 });
@@ -73,15 +87,20 @@ const GUN_SCALE = { rocketM: [1.2, 1.2, 1.15], bolt: [0.75, 0.75, 1.6], shell: [
 const FLASH = { vulcan: 1.6, rocket: 3.5, longrifle: 3, handcannon: 2.2 };
 const BOOM = { rocketS: 5, rocketM: 12, bolt: 6, shell: 7 };
 
+// Sound: synthesized, positioned around the camera. Browsers only start audio after a gesture.
+const sfx = createSynth(RECIPES, { volume: settings.volume });
+window.addEventListener('pointerdown', () => sfx.unlock());
+window.addEventListener('keydown', () => sfx.unlock());
+
 // Input and cameras.
 const keyboard = createKeyboard();
 const mouse = createMouse(canvas);
 const look = { yaw: 0, pitch: -0.18 };
-const mapper = createMapper({ keyboard, mouse, bindings: CFG.BINDINGS, look, sensitivity: CFG.CAMERA.sensitivity,
+const mapper = createMapper({ keyboard, mouse, bindings: CFG.BINDINGS, look, sensitivity: CFG.CAMERA.sensitivity * settings.sens,
   keyLookRate: CFG.CAMERA.keyLookRate, pitchLimits: CFG.CAMERA.pitchLimits });
 const tpRig = createThirdPersonRig(app.camera, CFG.CAMERA.tp);
 const fpRig = createFirstPersonRig(app.camera, CFG.CAMERA.fp);
-const lockRig = createLockOnRig(app.camera, { distance: CFG.CAMERA.tp.distance, pivotHeight: CFG.CAMERA.tp.pivotHeight, fov: CFG.CAMERA.tp.fov });
+const lockRig = createLockOnRig(app.camera, CFG.CAMERA.lock);
 const cam = createCameraBlender(app.camera, { time: CFG.CAMERA.blend });
 
 // ---------------------------------------------------------------- HUD
@@ -115,7 +134,6 @@ const vignette = el('div', 'vignette', hud);
 const msg = el('div', 'msg', hud);
 const ko = el('div', 'ko', hud);
 const koResult = el('div', 'result', ko);
-el('div', 'hint', ko, '按 R 再戰');
 const debug = el('div', 'debug', hud);
 const dmgNums = Array.from({ length: 12 }, () => el('div', 'dmgnum', hud));
 let dmgNext = 0;
@@ -132,46 +150,17 @@ let showDebug = params.has('debug');
 let hitmarkT = 0, vignetteT = 0, msgT = 0;
 const showMsg = (text, t = 1.2) => { msg.textContent = text; msg.classList.add('on'); msgT = t; };
 
-// Start panel with the loadout picker.
-const overlay = document.getElementById('overlay');
-const note = overlay.querySelector('.note');
-const keys = overlay.querySelector('.keys');
-for (const [label, key] of CFG.KEY_HINTS) { el('dt', '', keys, label); el('dd', '', keys, key); }
-const picker = overlay.querySelector('.picker');
-const pickerDesc = overlay.querySelector('.pickdesc');
-let loadoutDirty = false;
-function buildPicker() {
-  picker.innerHTML = '';
-  for (const [kind, table, zh] of [['weapon', CFG.WEAPON_CLASSES, '武裝'], ['armor', CFG.ARMORS, '裝甲']]) {
-    const row = el('div', 'row', picker);
-    el('span', 'rowlabel', row, zh);
-    for (const [id, def] of Object.entries(table)) {
-      const b = el('button', 'opt', row, def.zh);
-      b.type = 'button';
-      b.title = def.desc;
-      b.classList.toggle('on', loadout[kind] === id);
-      b.addEventListener('click', (e) => {
-        e.stopPropagation();
-        loadout[kind] = id;
-        loadoutDirty = true;
-        try { localStorage.setItem('skyline.loadout', JSON.stringify(loadout)); } catch (err) { /* private mode */ }
-        buildPicker();
-      });
-    }
-  }
-  pickerDesc.textContent = `${CFG.WEAPON_CLASSES[loadout.weapon].desc}。${CFG.ARMORS[loadout.armor].desc}。`;
-}
-buildPicker();
-overlay.querySelector('.cpu').textContent = `對手：${loadoutText(cpuLoadout)}`;
-
 // ---------------------------------------------------------------- battle state
-let world, me, enemy, prev, lastSeen = null;
-function startBattle() {
+let world, me, enemy, prev, lastSeen = null, ai = null;
+let inBattle = false, playing = false, koT = 0, pauseGraceT = 0, attractT = 0;
+// A fresh world with both mechs at their spawns; also what stands behind the title screen.
+function setupWorld() {
   world = createWorld({ stage, seed, loadouts: { 1: loadout, 2: cpuLoadout } });
   me = world.fighters[0]; enemy = world.fighters[1];
+  ai = createAI(settings.cpu, seed * 7 + 3);
   // Development: ?pos=x,y,z and ?look=yaw,pitch place the player and the camera for screenshots.
   if (params.get('pos')) { const [x, y, z] = params.get('pos').split(',').map(Number); Object.assign(me.pos, { x, y, z }); me.onGround = false; }
-  look.yaw = stage.spawns[0].yaw; look.pitch = -0.18;
+  look.yaw = stage.spawns[0].yaw; look.pitch = CFG.CAMERA.pitchDefault;
   if (params.get('look')) { const [yaw, pitch] = params.get('look').split(',').map(Number); look.yaw = yaw; look.pitch = pitch; }
   prev = world.fighters.map((f) => ({ x: f.pos.x, y: f.pos.y, z: f.pos.z, yaw: f.yaw }));
   world.fighters.forEach((f, i) => {
@@ -183,21 +172,20 @@ function startBattle() {
   });
   for (const fx of [sparks, smoke, debris, flashes, slashes, bolts, ...trails]) fx.clear();
   for (const fx of mechFx) { fx.hitT = Infinity; fx.firedT = Infinity; }
-  hitstopT = 0;
+  hitstopT = 0; koT = 0;
   lastSeen = null;
-  loadoutDirty = false;
   ko.classList.remove('on');
   meLoadout.textContent = loadoutText(loadout);
-  enemyName.textContent = `對手 · ${loadoutText(cpuLoadout)}`;
+  enemyName.textContent = `對手 · ${loadoutText(cpuLoadout)} · ${AI_LEVELS[settings.cpu].zh}`;
   slotEls.forEach((s, i) => { s.querySelector('.wname').textContent = weaponIn(me, CFG.SLOTS[i]).zh; });
   tpRig.reset(); lockRig.reset();
   cam.use(tpRig);
 }
-startBattle();
+setupWorld();
 
-// Stand-in opponent until the real AI arrives in M3: paces the street and fires the vulcan whenever it
-// sees the player. ?dummy=idle|walk|shoot|melee|ranged picks a single behaviour for testing.
-const dummyMode = params.get('dummy') || 'basic';
+// Scripted stand-in opponents for testing (?dummy=idle|walk|shoot|melee|ranged|basic); without the
+// parameter the real AI plays.
+const dummyMode = params.get('dummy') || '';
 const dummyIntent = createIntent();
 let dummyT = 0;
 function dummyStep(dt) {
@@ -222,22 +210,73 @@ function dummyStep(dt) {
   return dummyIntent;
 }
 
-// Start / pause overlay. Clicking the canvas captures the mouse; releasing it (Esc) brings the panel back.
-let playing = false;
+// ---------------------------------------------------------------- menus, pause and KO
+// `inBattle`: a match is on (or just ended); `playing`: the player's input drives it and the mouse is
+// captured. Pausing releases the mouse and shows the pause screen; closing it captures the mouse again.
 function setPlaying(on) {
   playing = on;
-  overlay.classList.toggle('hidden', on);
   document.body.classList.toggle('playing', on);
-  if (!on) keyboard.release();
-  if (on && loadoutDirty) startBattle();
+  keyboard.release();
+  if (on) pauseGraceT = 0.3;             // the key that closed a menu must not pause again
 }
-overlay.addEventListener('click', () => { setPlaying(true); mouse.requestLock(); });
-canvas.addEventListener('click', () => { if (!playing) setPlaying(true); mouse.requestLock(); });
-mouse.onLockChange((locked) => {
-  if (!locked && playing && mouse.state.supported) setPlaying(false);
-  if (!mouse.state.supported) note.textContent = '這裡無法鎖定滑鼠：用方向鍵控制鏡頭與準星。';
-});
-if (!mouse.state.supported) note.textContent = '這個瀏覽器沒有滑鼠鎖定：用方向鍵控制鏡頭與準星。';
+function startBattle() {
+  setupWorld();
+  inBattle = true;
+  ui.hide();
+  setPlaying(true);
+  mouse.requestLock();
+}
+function pause() {
+  if (!inBattle || !playing || world.winner) return;
+  setPlaying(false);
+  mouse.exitLock();
+  ui.show('pause');
+}
+function resume() {
+  if (!inBattle) return;
+  ui.hide();
+  setPlaying(true);
+  mouse.requestLock();
+}
+function quit() {
+  inBattle = false;
+  setPlaying(false);
+  mouse.exitLock();
+  setupWorld();
+  ui.hide();
+  ui.show('title');
+}
+function showKo() {
+  const win = world.winner === me.id;
+  const left = Math.max(0, Math.round(win ? me.hp : enemy.hp));
+  const text = `${win ? '擊破' : '敗給'} ${loadoutText(cpuLoadout)}（${AI_LEVELS[settings.cpu].zh}）· ${world.time.toFixed(0)} 秒 · 勝方剩餘 HP ${left}`;
+  setPlaying(false);
+  mouse.exitLock();
+  ko.classList.remove('on');
+  ui.show('ko', { win, text });
+}
+const ui = createScreens(document.getElementById('screens'));
+const ctx = {
+  loadout, cpuLoadout, settings, sfx, version: CFG.GAME.version,
+  get cpuLevel() { return settings.cpu; },
+  set cpuLevel(v) { settings.cpu = pick(AI_LEVELS, v, 'normal'); },
+  get note() { return mouse.state.supported ? '' : '這裡無法鎖定滑鼠：用方向鍵控制鏡頭與準星，Esc 暫停。'; },
+  startBattle, resume, quit,
+  rerollCpu() { cpuRoll = (cpuRoll * 7 + 5) % 997; rollCpu(); },
+  saveSettings() { save('skyline.settings', settings); save('skyline.loadout', loadout); },
+  applySettings() {
+    mapper.settings.sensitivity = CFG.CAMERA.sensitivity * settings.sens;
+    sfx.setVolume(settings.volume);
+    if (post) post.setEnabled(settings.bloom);
+  },
+};
+defineScreens(ui, ctx);
+ctx.applySettings();
+ui.show('title');
+canvas.addEventListener('click', () => { if (inBattle && playing) mouse.requestLock(); });
+// Losing the pointer lock (Esc, alt-tab) pauses; so does the tab going to the background.
+mouse.onLockChange((locked) => { if (!locked && playing && mouse.state.supported) pause(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
 window.addEventListener('keydown', (e) => { if (e.code === 'F3') { showDebug = !showDebug; e.preventDefault(); } });
 
 // ---------------------------------------------------------------- events → effects
@@ -297,6 +336,7 @@ function handleEvent(e) {
       koResult.textContent = e.by === me.id ? 'WIN' : 'LOSE';
       ko.classList.toggle('lose', e.by !== me.id);
       ko.classList.add('on');
+      koT = 1.8;                                          // the result screen follows the explosion
       break;
     }
     case 'land': if (e.hard) { smoke.burst(e.x, e.y + 0.5, e.z, 0x8a8f9a, 24, 16, 0.7, 10, 2); shakeAt(e.x, e.y, e.z, 0.3); } break;
@@ -315,13 +355,21 @@ let frames = 0, fpsTime = 0, fps = 0;
 const loop = createLoop({
   maxSteps: 10,                 // the simulation is cheap; let slow renderers keep real time
   step(dt) {
-    world.fighters.forEach((f, i) => { const p = prev[i]; p.x = f.pos.x; p.y = f.pos.y; p.z = f.pos.z; p.yaw = f.yaw; });
+    // Input is sampled every tick so key edges are consumed; the view only follows it in play.
+    const yaw = look.yaw, pitch = look.pitch;
     const intent = mapper.sample(dt);
+    if (!playing) { look.yaw = yaw; look.pitch = pitch; }
+    pauseGraceT -= dt;
+    if (!inBattle) return;
     if (intent.pressed.rematch && world.winner) { startBattle(); return; }
-    stepWorld(world, [playing ? intent : IDLE_INTENT, dummyStep(dt)], dt);
-    for (const e of drain(world)) handleEvent(e);
+    if (intent.pressed.pause && playing && pauseGraceT <= 0) { pause(); return; }
+    if (!playing && !world.winner) return;                                  // paused
+    world.fighters.forEach((f, i) => { const p = prev[i]; p.x = f.pos.x; p.y = f.pos.y; p.z = f.pos.z; p.yaw = f.yaw; });
+    stepWorld(world, [playing ? intent : IDLE_INTENT, dummyMode ? dummyStep(dt) : aiIntent(ai, world, 2, dt)], dt);
+    for (const e of drain(world)) { handleEvent(e); soundForEvent(sfx, e, world, me.id); }
   },
   render(alpha, frameDt) {
+    if (koT > 0) { koT -= frameDt; if (koT <= 0) showKo(); }
     // Hit stop: on a solid melee hit the picture holds for a few frames while the simulation goes on.
     const frozen = hitstopT > 0;
     if (frozen) hitstopT -= frameDt;
@@ -360,19 +408,38 @@ const loop = createLoop({
     sparks.update(animDt); smoke.update(animDt); debris.update(animDt); flashes.update(animDt); slashes.update(animDt);
     bolts.sync(world.projectiles, frozen ? 0 : alpha, animDt);
 
-    // Camera: first person while aiming, the lock-on orbit while locked, free orbit otherwise.
+    // Camera: a slow orbit over the city behind the menus; in play, first person while aiming, the
+    // lock-on orbit while locked, free orbit otherwise.
     const myPos = mechs[0].group.position, enemyPos = mechs[1].group.position;
-    let rig = tpRig;
-    if (me.aiming) { fpRig.fov = weaponIn(me, 'ranged').zoomFov; rig = fpRig; }
-    else if (me.lock && !enemy.dead) rig = lockRig;
-    cam.use(rig);
-    mechs[0].group.visible = !(me.aiming && !cam.blending);
-    cam.update(frameDt, myPos, look, world.statics, enemyPos);
-    shake.apply(app.camera, frameDt);
+    if (!inBattle) {
+      attractT += frameDt;
+      const a = attractT * 0.05;
+      app.camera.position.set(Math.cos(a) * 300, 175 + Math.sin(attractT * 0.17) * 10, Math.sin(a) * 300);
+      app.camera.lookAt(0, 30, 0);
+      if (app.camera.fov !== CFG.CAMERA.tp.fov) { app.camera.fov = CFG.CAMERA.tp.fov; app.camera.updateProjectionMatrix(); }
+      mechs[0].group.visible = true;
+    } else {
+      let rig = tpRig;
+      if (me.aiming) { fpRig.fov = weaponIn(me, 'ranged').zoomFov; rig = fpRig; }
+      else if (me.lock && !enemy.dead) rig = lockRig;
+      cam.use(rig);
+      mechs[0].group.visible = !(me.aiming && !cam.blending);
+      cam.update(frameDt, myPos, look, world.statics, enemyPos);
+      shake.apply(app.camera, frameDt);
+    }
+    sfx.listen(app.camera);
+    updateThrusterLoops(sfx, world, inBattle && (playing || !!world.winner));
+    // Late afternoon into night over the course of the match (?tod=0..1 pins it for screenshots).
+    const phase = stageVis.setTimeOfDay(todOverride == null ? dusk.start + (1 - dusk.start) * world.time / dusk.toNight : todOverride);
+    sky.set({ top: phase.sky.top, horizon: phase.sky.horizon, bottom: phase.sky.bottom, stars: phase.stars });
     sky.update(app.camera);
     app.render();
 
     // HUD.
+    hud.classList.toggle('hidden', !inBattle);
+    frames++; fpsTime += frameDt;
+    if (fpsTime >= 0.5) { fps = Math.round(frames / fpsTime); frames = 0; fpsTime = 0; }
+    if (!inBattle) return;
     const { w, h } = app.size;
     const rangedW = weaponIn(me, 'ranged');
     hpBar.set(me.hp / me.hpMax, me.hp <= 300 ? 'low' : '');
@@ -420,8 +487,6 @@ const loop = createLoop({
     if (vignetteT > 0) { vignetteT -= frameDt; vignette.style.opacity = Math.min(1, vignetteT * 3).toFixed(2); } else if (vignette.style.opacity !== '0') vignette.style.opacity = '0';
     if (msgT > 0) { msgT -= frameDt; if (msgT <= 0) msg.classList.remove('on'); }
 
-    frames++; fpsTime += frameDt;
-    if (fpsTime >= 0.5) { fps = Math.round(frames / fpsTime); frames = 0; fpsTime = 0; }
     if (showDebug) {
       debug.textContent = `${fps} fps  tick ${world.tick}  pos ${me.pos.x.toFixed(1)} ${me.pos.y.toFixed(1)} ${me.pos.z.toFixed(1)}` +
         `  vy ${me.vel.y.toFixed(1)}  ${me.onGround ? 'ground' : 'air'}${me.boosting ? ' boost' : ''}${me.dashTimer > 0 ? ' dash' : ''}${me.aiming ? ' aim' : ''}` +
@@ -434,6 +499,7 @@ loop.start();
 
 // Hooks for tests and tooling.
 window.__skyline = {
-  get world() { return world; }, look, mouse, app, post, get playing() { return playing; }, setPlaying, startBattle, stage, loadout, cpuLoadout,
-  version: CFG.GAME.version,
+  get world() { return world; }, look, mouse, app, post, sfx, ui, settings, stage, loadout, cpuLoadout,
+  get playing() { return playing; }, get inBattle() { return inBattle; },
+  setPlaying, startBattle, pause, resume, quit, version: CFG.GAME.version,
 };

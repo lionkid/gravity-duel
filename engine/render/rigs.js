@@ -36,8 +36,8 @@ export function createThirdPersonRig(camera, { distance = 42, pivotHeight = 14, 
 // Lock-on: the camera sits behind the player on the line from the target through the player and looks
 // at a point between them, so both mechs stay in frame while the player circles. It writes the view
 // angles it ends up with into `look`, so movement keys and a later first-person aim start from there.
-export function createLockOnRig(camera, { distance = 40, height = 9, pivotHeight = 14, targetHeight = 12, radius = 2.5, minDistance = 6,
-  smooth = 9, lookWeight = 0.32, fov = 55 } = {}) {
+export function createLockOnRig(camera, { distance = 42, height = 18, farDistance = 30, farHeight = 24, pivotHeight = 14, targetHeight = 12, radius = 2.5, minDistance = 6,
+  smooth = 9, lookWeight = 0.42, fov = 58 } = {}) {
   const pos = new THREE.Vector3();
   const flat = { x: 0, z: 1 };
   let first = true;
@@ -50,12 +50,15 @@ export function createLockOnRig(camera, { distance = 40, height = 9, pivotHeight
       const tgt = { x: target.x, y: target.y + targetHeight, z: target.z };
       const dx = player.x - target.x, dz = player.z - target.z, d = Math.hypot(dx, dz);
       if (d > 1) { flat.x = dx / d; flat.z = dz / d; }
-      const lift = clamp((tgt.y - pivot.y) * 0.3, -6, 12);
-      const want = { x: pivot.x + flat.x * distance, y: pivot.y + height + lift, z: pivot.z + flat.z * distance };
+      // Farther opponent: pull back and up so both mechs stay on screen.
+      const far = clamp((d - 40) / 160, 0, 1);
+      const dist = distance + farDistance * far, h = height + farHeight * far;
+      const lift = clamp((tgt.y - pivot.y) * 0.3, -6, 14);
+      const want = { x: pivot.x + flat.x * dist, y: pivot.y + h + lift, z: pivot.z + flat.z * dist };
       if (statics) {
         const hit = raycast(statics, pivot, want, radius);
         if (hit) {
-          const t = Math.max(minDistance / distance, hit.t - 0.5 / distance);
+          const t = Math.max(minDistance / dist, hit.t - 0.5 / dist);
           want.x = pivot.x + (want.x - pivot.x) * t; want.y = pivot.y + (want.y - pivot.y) * t; want.z = pivot.z + (want.z - pivot.z) * t;
           first = true;                                   // walls win instantly
         }

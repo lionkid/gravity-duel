@@ -149,8 +149,8 @@ function buildHighway(o, statics, ramps, lamps, lanes) {
 
 // Splits a lot into 2–3 building footprints with small gaps. Returns { x, z, w, d } centres and sizes.
 function layoutLot(rnd, cx, cz, lot) {
-  const gap = rnd.range(2, 4);
-  const inset = rnd.range(2, 6);                 // pavement around the lot
+  const gap = rnd.range(8, 14);                  // alleys between the lot's buildings: cover, and sometimes a squeeze
+  const inset = rnd.range(4, 8);                 // pavement around the lot
   const L = lot - inset * 2;
   const kind = rnd.int(3);
   if (kind === 0) {

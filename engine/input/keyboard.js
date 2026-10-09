@@ -7,13 +7,14 @@ export function createKeyboard(target = window) {
   const down = new Set();
   let pressed = new Set();
 
+  // Keys typed into form fields or sent to a focused button (a menu) are not game input.
   const typing = (e) => {
     const t = e.target;
-    return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+    return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'BUTTON' || t.isContentEditable);
   };
   const onDown = (e) => {
     if (typing(e)) return;
-    if (!down.has(e.code)) pressed.add(e.code);
+    if (!down.has(e.code) && !e.repeat) pressed.add(e.code);
     down.add(e.code);
     if (PREVENT_DEFAULT.has(e.code)) e.preventDefault();
   };

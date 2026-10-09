@@ -1,33 +1,53 @@
 // Builds the visible stage from Stage data: sky, lights, ground, roads, and every static box as a
 // mesh. Buildings are one InstancedMesh whose windows are drawn in the shader from world position,
-// so a whole city costs a handful of draw calls and needs no textures.
+// so a whole city costs a handful of draw calls and needs no textures. setTimeOfDay(t) moves the
+// scene from day (0) through dusk (0.5) to night (1): sky, sun, fog, windows and lamps follow.
 
 import * as THREE from 'three';
 
 const DEFAULT_PALETTE = {
-  sky: 0x0a0d18, fog: 0x0a0d18, ground: 0x15181f, road: 0x1d222c, lane: 0x7d8696, kerb: 0x2a3040,
+  ground: 0x15181f, road: 0x1d222c, lane: 0x7d8696, kerb: 0x2a3040,
   concrete: 0x5a6378, rail: 0x8893a6, fence: 0x58e0ff, lamp: 0xffe2b0, post: 0x1b1f2a,
   buildings: [0x2b3346, 0x343c52, 0x3d4154, 0x283447, 0x3a3348],
 };
 
-// A small equirectangular gradient used as the environment map: metal armour needs something to
-// reflect, and a night sky over a lit city is enough.
-export function setNightEnvironment(renderer, scene, { top = '#0c1630', horizon = '#3a4f86', ground = '#07080c' } = {}) {
+// Lighting keyframes: noon, dusk and night. Everything in between is interpolated.
+const PHASES = [
+  { t: 0, sky: [0x5f9ae6, 0xbfd8f5, 0x3b4654], sun: { color: 0xfff0d8, intensity: 2.6, dir: [-0.3, 0.9, 0.3] }, hemi: { sky: 0xa9c8ff, ground: 0x6a6f78, intensity: 1.1 }, fog: 0xb9cfe8, fogDensity: 0.00045, stars: 0, night: 0, envDay: 1 },
+  { t: 0.5, sky: [0x2e3f7a, 0xff9c5c, 0x2a2430], sun: { color: 0xffb070, intensity: 1.7, dir: [-0.9, 0.22, 0.3] }, hemi: { sky: 0x6a6fb0, ground: 0x3a3038, intensity: 1.0 }, fog: 0x6b5a7a, fogDensity: 0.0006, stars: 0.3, night: 0.45, envDay: 0.5 },
+  { t: 1, sky: [0x070b1a, 0x2a3a66, 0x05060a], sun: { color: 0xb4c2ff, intensity: 1.9, dir: [-0.5, 0.78, 0.36] }, hemi: { sky: 0x5f74ad, ground: 0x0d1016, intensity: 1.6 }, fog: 0x0a0d18, fogDensity: 0.0009, stars: 1, night: 1, envDay: 0 },
+];
+
+function gradientEnvironment(renderer, stops) {
   const c = document.createElement('canvas');
   c.width = 64; c.height = 32;
   const g = c.getContext('2d');
   const grad = g.createLinearGradient(0, 0, 0, 32);
-  grad.addColorStop(0, top); grad.addColorStop(0.5, horizon); grad.addColorStop(0.56, '#1a1a22'); grad.addColorStop(1, ground);
+  for (const [at, color] of stops) grad.addColorStop(at, color);
   g.fillStyle = grad; g.fillRect(0, 0, 64, 32);
-  // A few bright spots so highlights have something to catch.
   for (let i = 0; i < 12; i++) { g.fillStyle = i % 3 ? '#ffd9a0' : '#9fd4ff'; g.fillRect((i * 17) % 64, 17 + (i % 2), 2, 1); }
   const tex = new THREE.CanvasTexture(c);
   tex.mapping = THREE.EquirectangularReflectionMapping;
   tex.colorSpace = THREE.SRGBColorSpace;
   const pmrem = new THREE.PMREMGenerator(renderer);
-  scene.environment = pmrem.fromEquirectangular(tex).texture;
-  scene.environmentIntensity = 1.0;
+  const env = pmrem.fromEquirectangular(tex).texture;
   tex.dispose(); pmrem.dispose();
+  return env;
+}
+
+// Environment maps for reflections: a bright day sky and the night city. Returned so the stage can
+// switch between them as the light changes.
+export function createEnvironments(renderer) {
+  return {
+    day: gradientEnvironment(renderer, [[0, '#4d86d8'], [0.5, '#cfe2fa'], [0.56, '#6a6f78'], [1, '#2a2d33']]),
+    night: gradientEnvironment(renderer, [[0, '#0c1630'], [0.5, '#3a4f86'], [0.56, '#1a1a22'], [1, '#07080c']]),
+  };
+}
+
+// Kept for callers that only want the night look.
+export function setNightEnvironment(renderer, scene) {
+  scene.environment = createEnvironments(renderer).night;
+  scene.environmentIntensity = 1.0;
 }
 
 export function buildStageVisual(scene, stage, options = {}) {
@@ -37,12 +57,12 @@ export function buildStageVisual(scene, stage, options = {}) {
   const b = stage.bounds;
   const groundY = stage.groundY || 0;
 
-  scene.background = new THREE.Color(pal.sky);
-  scene.fog = new THREE.FogExp2(pal.fog, options.fogDensity == null ? 0.0009 : options.fogDensity);
-  group.add(new THREE.HemisphereLight(0x5f74ad, 0x0d1016, 1.6));
-  const moon = new THREE.DirectionalLight(0xb4c2ff, 1.9);
-  moon.position.set(-320, 520, 240);
-  group.add(moon);
+  scene.background = new THREE.Color(PHASES[2].fog);
+  scene.fog = new THREE.FogExp2(PHASES[2].fog, PHASES[2].fogDensity);
+  const hemi = new THREE.HemisphereLight(PHASES[2].hemi.sky, PHASES[2].hemi.ground, PHASES[2].hemi.intensity);
+  const sun = new THREE.DirectionalLight(PHASES[2].sun.color, PHASES[2].sun.intensity);
+  sun.position.set(-320, 520, 240);
+  group.add(hemi, sun);
 
   // Ground.
   const extent = Math.max(b.maxX - b.minX, b.maxZ - b.minZ) * 3;
@@ -63,11 +83,8 @@ export function buildStageVisual(scene, stage, options = {}) {
       m.position.set((r.x0 + r.x1) / 2, groundY + 0.03, (r.z0 + r.z1) / 2);
       group.add(m);
       const y = groundY + 0.06, inset = 1.5;
-      if (w >= d) {
-        lines.push(r.x0, y, r.z0 + inset, r.x1, y, r.z0 + inset, r.x0, y, r.z1 - inset, r.x1, y, r.z1 - inset);
-      } else {
-        lines.push(r.x0 + inset, y, r.z0, r.x0 + inset, y, r.z1, r.x1 - inset, y, r.z0, r.x1 - inset, y, r.z1);
-      }
+      if (w >= d) lines.push(r.x0, y, r.z0 + inset, r.x1, y, r.z0 + inset, r.x0, y, r.z1 - inset, r.x1, y, r.z1 - inset);
+      else lines.push(r.x0 + inset, y, r.z0, r.x0 + inset, y, r.z1, r.x1 - inset, y, r.z0, r.x1 - inset, y, r.z1);
     }
     const lg = new THREE.BufferGeometry();
     lg.setAttribute('position', new THREE.Float32BufferAttribute(lines, 3));
@@ -77,11 +94,13 @@ export function buildStageVisual(scene, stage, options = {}) {
   // Static boxes by tag.
   const byTag = {};
   for (const s of stage.statics) (byTag[s.tag || 'building'] = byTag[s.tag || 'building'] || []).push(s);
-  if (byTag.building) group.add(buildBuildings(byTag.building, pal));
+  const buildings = byTag.building ? buildBuildings(byTag.building, pal) : null;
+  if (buildings) group.add(buildings.mesh);
   for (const tag of ['deck', 'kerb', 'rail', 'pillar', 'prop']) if (byTag[tag]) group.add(buildPlainBoxes(byTag[tag], tag, pal));
   for (const r of stage.ramps || []) group.add(buildRamp(r, pal));
   const vis = stage.visual || {};
-  if (vis.lamps && vis.lamps.length) group.add(buildLamps(vis.lamps, pal));
+  const lamps = vis.lamps && vis.lamps.length ? buildLamps(vis.lamps, pal) : null;
+  if (lamps) group.add(lamps.group);
   if (vis.lanes && vis.lanes.length) group.add(buildDashes(vis.lanes, pal));
 
   // The arena fence: faint glowing walls at the bounds.
@@ -94,10 +113,45 @@ export function buildStageVisual(scene, stage, options = {}) {
   addWall(b.maxZ - b.minZ, b.minX, (b.minZ + b.maxZ) / 2, Math.PI / 2);
   addWall(b.maxZ - b.minZ, b.maxX, (b.minZ + b.maxZ) / 2, Math.PI / 2);
   group.add(fence);
-
   scene.add(group);
+
+  // ---- time of day
+  const envs = options.environments || null;
+  const ca = new THREE.Color(), cb = new THREE.Color();
+  const lerpColor = (a, b2, k) => ca.setHex(a).lerp(cb.setHex(b2), k);
+  const phase = { sky: { top: new THREE.Color(), horizon: new THREE.Color(), bottom: new THREE.Color() }, stars: 1, night: 1 };
+  function setTimeOfDay(t) {
+    t = Math.max(0, Math.min(1, t));
+    const [p, q] = t < 0.5 ? [PHASES[0], PHASES[1]] : [PHASES[1], PHASES[2]];
+    const k = (t - p.t) / (q.t - p.t);
+    const num = (a, b2) => a + (b2 - a) * k;
+    phase.sky.top.copy(lerpColor(p.sky[0], q.sky[0], k));
+    phase.sky.horizon.copy(lerpColor(p.sky[1], q.sky[1], k));
+    phase.sky.bottom.copy(lerpColor(p.sky[2], q.sky[2], k));
+    phase.stars = num(p.stars, q.stars);
+    phase.night = num(p.night, q.night);
+    scene.fog.color.copy(lerpColor(p.fog, q.fog, k));
+    scene.fog.density = num(p.fogDensity, q.fogDensity);
+    scene.background.copy(scene.fog.color);
+    sun.color.copy(lerpColor(p.sun.color, q.sun.color, k));
+    sun.intensity = num(p.sun.intensity, q.sun.intensity);
+    sun.position.set(num(p.sun.dir[0], q.sun.dir[0]), num(p.sun.dir[1], q.sun.dir[1]), num(p.sun.dir[2], q.sun.dir[2])).normalize().multiplyScalar(600);
+    hemi.color.copy(lerpColor(p.hemi.sky, q.hemi.sky, k));
+    hemi.groundColor.copy(lerpColor(p.hemi.ground, q.hemi.ground, k));
+    hemi.intensity = num(p.hemi.intensity, q.hemi.intensity);
+    if (buildings) buildings.setNight(phase.night);
+    if (lamps) lamps.setNight(phase.night);
+    if (envs) {
+      const dayness = num(p.envDay, q.envDay);
+      scene.environment = dayness > 0.5 ? envs.day : envs.night;
+      scene.environmentIntensity = dayness > 0.5 ? 0.6 + 0.4 * dayness : 1.0;
+    }
+    return phase;
+  }
+  setTimeOfDay(options.timeOfDay == null ? 1 : options.timeOfDay);
+
   return {
-    group,
+    group, setTimeOfDay, phase,
     dispose() {
       scene.remove(group);
       group.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material && o.material.dispose) o.material.dispose(); });
@@ -105,12 +159,13 @@ export function buildStageVisual(scene, stage, options = {}) {
   };
 }
 
-// Street lamps: a dark post and an emissive head (bloom makes them glow). Purely visual.
+// Street lamps: a dark post and an emissive head that comes on at dusk. Purely visual.
 function buildLamps(lamps, pal) {
   const g = new THREE.Group();
   g.name = 'lamps';
   const posts = new THREE.InstancedMesh(new THREE.BoxGeometry(0.6, 8, 0.6), new THREE.MeshStandardMaterial({ color: pal.post, roughness: 0.7, metalness: 0.5 }), lamps.length);
-  const heads = new THREE.InstancedMesh(new THREE.BoxGeometry(2.4, 0.5, 1.2), new THREE.MeshStandardMaterial({ color: pal.lamp, emissive: pal.lamp, emissiveIntensity: 2.5, roughness: 0.4 }), lamps.length);
+  const headMat = new THREE.MeshStandardMaterial({ color: pal.lamp, emissive: pal.lamp, emissiveIntensity: 2.5, roughness: 0.4 });
+  const heads = new THREE.InstancedMesh(new THREE.BoxGeometry(2.4, 0.5, 1.2), headMat, lamps.length);
   const m = new THREE.Matrix4();
   lamps.forEach((l, i) => {
     m.identity().setPosition(l.post[0], l.post[1] + 4, l.post[2]);
@@ -120,7 +175,7 @@ function buildLamps(lamps, pal) {
   });
   posts.name = 'lamp-posts'; heads.name = 'lamp-heads';
   g.add(posts, heads);
-  return g;
+  return { group: g, setNight(n) { headMat.emissiveIntensity = 2.5 * Math.max(0, Math.min(1, (n - 0.35) / 0.4)); } };
 }
 
 // Dashed centre lines (6 m dash, 6 m gap) for roads and decks.
@@ -128,9 +183,7 @@ function buildDashes(lanes, pal) {
   const pts = [];
   for (const l of lanes) {
     const dx = l.x1 - l.x0, dz = l.z1 - l.z0, len = Math.hypot(dx, dz), ux = dx / len, uz = dz / len;
-    for (let d = 3; d + 6 <= len; d += 12) {
-      pts.push(l.x0 + ux * d, l.y + 0.06, l.z0 + uz * d, l.x0 + ux * (d + 6), l.y + 0.06, l.z0 + uz * (d + 6));
-    }
+    for (let d = 3; d + 6 <= len; d += 12) pts.push(l.x0 + ux * d, l.y + 0.06, l.z0 + uz * d, l.x0 + ux * (d + 6), l.y + 0.06, l.z0 + uz * (d + 6));
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
@@ -175,8 +228,10 @@ function buildBuildings(list, pal) {
   const seeds = new Float32Array(list.length);
   geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seeds, 1));
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55, metalness: 0.25 });
+  const uniforms = { uNight: { value: 1 } };
   mat.customProgramCacheKey = () => 'city-windows';
   mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uNight = uniforms.uNight;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nattribute float aSeed;\nvarying float vSeed;\nvarying vec3 vWPos;\nvarying vec3 vWNormal;')
       .replace('#include <begin_vertex>', `#include <begin_vertex>
@@ -191,6 +246,7 @@ function buildBuildings(list, pal) {
         vSeed = aSeed;`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
+        uniform float uNight;
         varying float vSeed;
         varying vec3 vWPos;
         varying vec3 vWNormal;
@@ -209,18 +265,18 @@ function buildBuildings(list, pal) {
             vec2 hi = 1.0 - smoothstep(vec2(0.8, 0.78) - fw, vec2(0.8, 0.78) + fw, f);
             float win = lo.x * hi.x * lo.y * hi.y;
             float h = cityHash(cell);
-            float on = step(0.6, h);
+            // Lights come on one by one through dusk: the lowest hashes first.
+            float on = smoothstep(h - 0.05, h + 0.05, uNight * 0.4 + 0.15) * step(0.3, h);
             vec3 warm = vec3(1.0, 0.72, 0.42), cool = vec3(0.55, 0.82, 1.0);
             vec3 wc = mix(warm, cool, step(0.86, h));
             // Far away the grid is finer than a pixel: fade to its average glow instead of shimmering.
             float far = smoothstep(0.3, 1.2, max(fw.x, fw.y));
-            float avgWin = 0.6 * 0.56;
+            float avgWin = 0.6 * 0.4 * uNight;
             vec3 avgGlow = mix(warm, cool, 0.14) * 0.3 * avgWin;
-            // Just under the bloom threshold: windows read as lit without hazing the whole frame.
             totalEmissiveRadiance += mix(wc * on * win, avgGlow, far) * 0.95;
-            diffuseColor.rgb *= 1.0 - mix(win, avgWin, far) * 0.6;
+            // Glass: dark at night, a pale sky reflection by day.
+            diffuseColor.rgb = mix(diffuseColor.rgb * (1.0 - mix(win, avgWin, far) * 0.6), mix(diffuseColor.rgb, vec3(0.62, 0.72, 0.86), win * 0.55), 1.0 - uNight);
           } else {
-            // Roofs: a thin lit edge so building tops read against the dark sky.
             diffuseColor.rgb *= 0.8;
           }
         }`);
@@ -232,12 +288,11 @@ function buildBuildings(list, pal) {
     m.makeScale(s.max[0] - s.min[0], s.max[1] - s.min[1], s.max[2] - s.min[2]);
     m.setPosition((s.min[0] + s.max[0]) / 2, (s.min[1] + s.max[1]) / 2, (s.min[2] + s.max[2]) / 2);
     mesh.setMatrixAt(i, m);
-    const seed = s.seed == null ? i * 0.618 : s.seed;
-    seeds[i] = seed;
+    seeds[i] = s.seed == null ? i * 0.618 : s.seed;
     mesh.setColorAt(i, color.setHex(pal.buildings[(s.tint == null ? i : s.tint) % pal.buildings.length]));
   });
   mesh.instanceMatrix.needsUpdate = true;
   if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   mesh.name = 'statics:building';
-  return mesh;
+  return { mesh, setNight(n) { uniforms.uNight.value = n; } };
 }

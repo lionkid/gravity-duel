@@ -41,5 +41,12 @@ export function createSky({ top = 0x070b1a, horizon = 0x2a3a66, bottom = 0x05060
     mesh,
     // Keep the dome centred on the camera so it never gets closer or farther.
     update(camera) { mesh.position.copy(camera.position); },
+    // Recolour for a time of day; colours are THREE.Color or hex.
+    set({ top: t, horizon: h, bottom: b, stars: s }) {
+      if (t != null) mat.uniforms.top.value.set(t);
+      if (h != null) mat.uniforms.horizon.value.set(h);
+      if (b != null) mat.uniforms.bottom.value.set(b);
+      if (s != null) mat.uniforms.stars.value = s;
+    },
   };
 }

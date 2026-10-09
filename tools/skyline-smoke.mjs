@@ -28,18 +28,35 @@ page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') 
 page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
 const t0 = Date.now();
 await page.goto(`http://127.0.0.1:${port}/games/skyline/?seed=7&debug&bloom=0`);
-await page.waitForFunction(() => window.__skyline && window.__skyline.world.tick > 5, null, { timeout: 30000 });
+await page.waitForFunction(() => window.__skyline && window.__skyline.ui.name === 'title', null, { timeout: 30000 });
 console.log(`page ready in ${Date.now() - t0} ms`);
 const shot = async (name) => { await page.screenshot({ path: path.join(outDir, `${name}.png`) }); console.log(`  saved ${name}.png`); };
 const state = () => page.evaluate(() => { const f = window.__skyline.world.fighters[0]; return { tick: window.__skyline.world.tick, x: +f.pos.x.toFixed(1), y: +f.pos.y.toFixed(1), z: +f.pos.z.toFixed(1), ground: f.onGround, fuel: +f.fuel.toFixed(2) }; });
 
+// Through the menus: title → difficulty → loadout → battle.
+await page.waitForTimeout(600);
 await shot('01-title');
-await page.evaluate(() => window.__skyline.setPlaying(true));
+await page.click('[data-act="solo"]');
+await page.click('[data-act="pick"][data-level="hard"]');
+await shot('01b-loadout');
+await page.click('[data-act="start"]');
+await page.waitForFunction(() => window.__skyline.inBattle && window.__skyline.world.tick > 5, null, { timeout: 30000 });
+console.log(`  battle started; screen ${await page.evaluate(() => window.__skyline.ui.name)}, playing ${await page.evaluate(() => window.__skyline.playing)}`);
 await page.keyboard.down('KeyW');
 await page.waitForTimeout(1200);
 await shot('02-running');
 console.log('  after running:', await state());
 await page.keyboard.up('KeyW');
+// Esc pauses (no pointer lock in headless Chromium, so the key itself does it); Esc again resumes.
+await page.keyboard.press('Escape');
+await page.waitForFunction(() => window.__skyline.ui.name === 'pause', null, { timeout: 5000 });
+await shot('11-pause');
+const tickPaused = await page.evaluate(() => window.__skyline.world.tick);
+await page.waitForTimeout(300);
+console.log(`  paused: tick stays ${tickPaused} → ${await page.evaluate(() => window.__skyline.world.tick)}`);
+await page.keyboard.press('Escape');
+await page.waitForFunction(() => window.__skyline.playing && window.__skyline.ui.name === null, null, { timeout: 5000 });
+console.log('  resumed');
 // Vulcan from the street: locked on, level with the opponent, in range.
 await page.keyboard.down('KeyJ');
 await page.waitForTimeout(1500);
@@ -81,8 +98,10 @@ await page.close();
   const p3 = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   p3.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   await p3.goto(`http://127.0.0.1:${port}/games/skyline/?seed=7&pos=0,0,-48&bloom=0`, { timeout: 60000 });
-  await p3.waitForFunction(() => window.__skyline && window.__skyline.world.tick > 3, null, { timeout: 30000 });
-  await p3.evaluate(() => window.__skyline.setPlaying(true));
+  await p3.waitForFunction(() => window.__skyline, null, { timeout: 30000 });
+  await p3.evaluate(() => window.__skyline.startBattle());
+  await p3.waitForFunction(() => window.__skyline.world.tick > 3, null, { timeout: 30000 });
+  await p3.evaluate(() => { window.__skyline.world.fighters[1].hp = 1; });
   await p3.keyboard.press('Digit1');
   await p3.waitForFunction(() => window.__skyline.world.fighters[0].switchTimer === 0 && window.__skyline.world.fighters[0].active === 'melee', null, { timeout: 10000 });
   await p3.keyboard.press('KeyJ');
@@ -90,6 +109,9 @@ await page.close();
   await p3.screenshot({ path: path.join(outDir, '10-melee.png') });
   console.log('  saved 10-melee.png');
   console.log(`  opponent hp after melee: ${await p3.evaluate(() => window.__skyline.world.fighters[1].hp)}`);
+  await p3.waitForFunction(() => window.__skyline.ui.name === 'ko', null, { timeout: 10000 }).catch(() => {});
+  await p3.screenshot({ path: path.join(outDir, '12-ko.png') });
+  console.log(`  saved 12-ko.png (screen ${await p3.evaluate(() => window.__skyline.ui.name)})`);
   await p3.close();
 }
 
@@ -98,8 +120,9 @@ for (const [name, q] of [['06-highway', 'pos=0,0,40&look=3.14159,-0.05'], ['07-s
   const p2 = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   p2.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   await p2.goto(`http://127.0.0.1:${port}/games/skyline/?seed=7&${q}`, { timeout: 60000 });
-  await p2.waitForFunction(() => window.__skyline && window.__skyline.world.tick > 3, null, { timeout: 30000 });
-  await p2.evaluate(() => window.__skyline.setPlaying(true));
+  await p2.waitForFunction(() => window.__skyline, null, { timeout: 30000 });
+  await p2.evaluate(() => window.__skyline.startBattle());
+  await p2.waitForFunction(() => window.__skyline.world.tick > 3, null, { timeout: 30000 });
   await p2.waitForTimeout(400);
   await p2.screenshot({ path: path.join(outDir, `${name}.png`) });
   console.log(`  saved ${name}.png`);

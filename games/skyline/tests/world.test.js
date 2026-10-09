@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { generateCity, HW } from '../stages/city.js';
 import { createWorld, stepWorld, fighterState } from '../rules/world.js';
 import { createIntent, IDLE_INTENT } from '../../../engine/input/intent.js';
-import { MOVE, STAGES } from '../config.js';
+import { MOVE, STAGES, ARMORS } from '../config.js';
 
 const DT = 1 / 60;
 function world(seed = 3) {
@@ -37,14 +37,15 @@ test('running reaches top speed quickly and turns the body toward the movement',
   run(w, 2, (it, i) => { it.pressed.lock = i === 0; });
   // Down the central street (-z), then back up it (+z): the body turns to face each way.
   const f = run(w, 120, (it) => { it.move.z = -1; });
-  assert.ok(Math.abs(Math.hypot(f.vel.x, f.vel.z) - MOVE.run) < 1e-6, `top speed, got ${Math.hypot(f.vel.x, f.vel.z)}`);
+  const top = MOVE.run * ARMORS[f.loadout.armor].speed;                 // armour sets the speed multiplier
+  assert.ok(Math.abs(Math.hypot(f.vel.x, f.vel.z) - top) < 1e-6, `top speed ${top}, got ${Math.hypot(f.vel.x, f.vel.z)}`);
   assert.ok(f.pos.z < z0 - 40, `covered ground, got z=${f.pos.z}`);
   assert.ok(f.onGround && Math.abs(f.pos.x) < 1e-6 && f.yaw === 0);
   run(w, 60, (it) => { it.move.z = 1; });
   assert.ok(Math.abs(Math.abs(f.yaw) - Math.PI) < 1e-6, `faces +z (yaw π), got ${f.yaw}`);
   // Into the buildings beside the street: blocked, sliding is the controller's job.
   run(w, 60, (it) => { it.move.x = 1; });
-  assert.ok(f.hitWall && f.vel.x === 0 && f.pos.x < 15, `stopped by the building face, x=${f.pos.x}`);
+  assert.ok(f.hitWall && f.vel.x === 0 && f.pos.x < STAGES.city.street / 2 + 10, `stopped by the building face, x=${f.pos.x}`);
 });
 
 test('an air dash does not glide at dash speed forever', () => {
@@ -103,7 +104,7 @@ test('holding aim slows movement and turns the body to the view', () => {
   const w = world();
   const f = run(w, 120, (it) => { it.move.z = -1; it.held.aim = true; it.aim.yaw = 1.0; it.aim.pitch = 0.3; });
   assert.ok(f.aiming);
-  assert.ok(Math.abs(Math.hypot(f.vel.x, f.vel.z) - MOVE.run * MOVE.aimMoveMul) < 1e-6);
+  assert.ok(Math.abs(Math.hypot(f.vel.x, f.vel.z) - MOVE.run * ARMORS[f.loadout.armor].speed * MOVE.aimMoveMul) < 1e-6);
   assert.ok(Math.abs(f.yaw - 1.0) < 1e-6, `body follows the aim yaw, got ${f.yaw}`);
   assert.equal(f.aim.pitch, 0.3);
 });

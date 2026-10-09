@@ -35,36 +35,36 @@ export const MOVE = {
 // Weapon classes: what the player picks. Every mech carries the vulcan plus one ranged and one melee
 // weapon; the class decides which ones. Armour trades one damage kind against the other.
 export const WEAPON_CLASSES = {
-  normal: { id: 'normal', zh: '普通', desc: '光束步槍與光劍，兩頭都能打' },
-  ranged: { id: 'ranged', zh: '遠程', desc: '長距離步槍一擊 150，近戰只有短刀' },
-  melee: { id: 'melee', zh: '近戰', desc: '巨劍一擊 320、起手有霸體，遠程只有會下墜的手砲' },
+  normal: { id: 'normal', zh: '普通', desc: '火箭砲與光劍，兩頭都能打' },
+  ranged: { id: 'ranged', zh: '遠程', desc: '長距離步槍一擊 135，近戰只有短刀' },
+  melee: { id: 'melee', zh: '近戰', desc: '巨劍一擊 280、起手有霸體，遠程只有會下墜的手砲' },
 };
 export const ARMORS = {
-  normal: { id: 'normal', zh: '標準裝甲', desc: '沒有弱點，也沒有強項', ranged: 1, light: 1, melee: 1, speed: 1 },
-  antiRanged: { id: 'antiRanged', zh: '防遠程', desc: '遠程 ×0.65、火神砲 ×0.55，近戰 ×1.2，略慢', ranged: 0.65, light: 0.55, melee: 1.2, speed: 0.95 },
-  antiMelee: { id: 'antiMelee', zh: '防近戰', desc: '近戰 ×0.6，遠程與火神砲 ×1.2，略慢', ranged: 1.2, light: 1.2, melee: 0.6, speed: 0.95 },
+  normal: { id: 'normal', zh: '標準裝甲', desc: '沒有弱點，而且是最快的一套', ranged: 1, light: 1, melee: 1, speed: 1.08 },
+  antiRanged: { id: 'antiRanged', zh: '防遠程', desc: '遠程 ×0.8、火神砲 ×0.7，近戰 ×1.45，慢', ranged: 0.8, light: 0.7, melee: 1.45, speed: 0.88 },
+  antiMelee: { id: 'antiMelee', zh: '防近戰', desc: '近戰 ×0.6，遠程 ×1.05、火神砲 ×1.08', ranged: 1.05, light: 1.08, melee: 0.6, speed: 0.97 },
 };
 export const WEAPONS = {
   // Hip-fired straight ahead along the body, level: no aiming, so height differences beat it.
   // A stream of small rockets: visible in flight, a little pop on impact.
-  vulcan: { id: 'vulcan', zh: '火神砲', kind: 'light', dmg: 11, rate: 8, spread: 0.05, range: 150, speed: 220, gravityScale: 0.15, heatTime: 3, cool: 0.6, overheatUntil: 0.4, stun: 0.04, knock: 4, color: 0xffb060, look: 'rocketS' },
+  vulcan: { id: 'vulcan', zh: '火神砲', kind: 'light', dmg: 8, rate: 8, spread: 0.05, range: 150, speed: 260, gravityScale: 0.15, heatTime: 3, cool: 0.6, overheatUntil: 0.4, stun: 0.04, knock: 4, color: 0xffb060, look: 'rocketS' },
   // Fired only while aiming in first person, along the view angles.
   ranged: {
-    normal: { id: 'rocket', zh: '火箭砲', kind: 'ranged', dmg: 80, interval: 0.9, speed: 300, gravityScale: 0.1, energy: 30, energyMax: 100, regen: 18, zoomFov: 40, aimMoveMul: 0.6, ttl: 2.5, stun: 0.35, knock: 16, color: 0xff9a4a, look: 'rocketM' },
-    ranged: { id: 'longrifle', zh: '長距離步槍', kind: 'ranged', dmg: 150, interval: 2.0, speed: 900, gravityScale: 0, energy: 45, energyMax: 100, regen: 15, zoomFov: 30, aimMoveMul: 0.4, ttl: 2, stun: 0.45, knock: 20, color: 0xa0ffea, look: 'bolt' },
-    melee: { id: 'handcannon', zh: '手砲', kind: 'ranged', dmg: 40, interval: 0.5, speed: 260, gravityScale: 0.5, energy: 15, energyMax: 100, regen: 25, zoomFov: 45, aimMoveMul: 0.7, ttl: 3, stun: 0.15, knock: 8, color: 0xffd27a, look: 'shell' },
+    normal: { id: 'rocket', zh: '火箭砲', kind: 'ranged', dmg: 95, interval: 0.9, speed: 380, gravityScale: 0.1, energy: 30, energyMax: 100, regen: 18, zoomFov: 40, aimMoveMul: 0.6, ttl: 2.5, stun: 0.35, knock: 16, color: 0xff9a4a, look: 'rocketM' },
+    ranged: { id: 'longrifle', zh: '長距離步槍', kind: 'ranged', dmg: 135, interval: 1.9, speed: 900, gravityScale: 0, energy: 38, energyMax: 100, regen: 18, zoomFov: 30, aimMoveMul: 0.4, ttl: 2, stun: 0.45, knock: 20, color: 0xa0ffea, look: 'bolt' },
+    melee: { id: 'handcannon', zh: '手砲', kind: 'ranged', dmg: 36, interval: 0.5, speed: 260, gravityScale: 0.5, energy: 18, energyMax: 100, regen: 25, zoomFov: 45, aimMoveMul: 0.7, ttl: 3, stun: 0.15, knock: 8, color: 0xffd27a, look: 'shell' },
   },
   // Lock-on lunge then swing. combo lists the swings in order (style: how the arm moves, knock: how
   // far the hit throws); reach/width is the hit box ahead. Later swings step in so a combo connects.
   melee: {
     normal: { id: 'saber', zh: '光劍', kind: 'melee', combo: [{ dmg: 120, windup: 0.14, active: 0.14, recovery: 0.26, style: 'slashR', knock: 8 }, { dmg: 120, windup: 0.12, active: 0.14, recovery: 0.26, style: 'slashL', knock: 8 }, { dmg: 180, windup: 0.2, active: 0.16, recovery: 0.42, style: 'overhead', knock: 30 }], lungeRange: 45, lungeDist: 30, lungeSpeed: 120, stepSpeed: 40, reach: 14, width: 14, stun: 0.35, superArmor: false, guardBreak: false, color: 0x58e0ff, bladeScale: [1, 1, 1] },
-    melee: { id: 'greatblade', zh: '巨劍', kind: 'melee', combo: [{ dmg: 320, windup: 0.38, active: 0.18, recovery: 0.55, style: 'overhead', knock: 34 }], lungeRange: 55, lungeDist: 40, lungeSpeed: 130, stepSpeed: 40, reach: 17, width: 18, stun: 0.6, superArmor: true, guardBreak: true, color: 0xff7a3d, bladeScale: [1.8, 1.25, 1.8] },
+    melee: { id: 'greatblade', zh: '巨劍', kind: 'melee', combo: [{ dmg: 280, windup: 0.38, active: 0.18, recovery: 0.55, style: 'overhead', knock: 34 }], lungeRange: 50, lungeDist: 40, lungeSpeed: 130, stepSpeed: 40, reach: 17, width: 18, stun: 0.6, superArmor: true, guardBreak: true, color: 0xff7a3d, bladeScale: [1.8, 1.25, 1.8] },
     ranged: { id: 'knife', zh: '短刀', kind: 'melee', combo: [{ dmg: 90, windup: 0.1, active: 0.12, recovery: 0.2, style: 'slashR', knock: 6 }, { dmg: 90, windup: 0.1, active: 0.12, recovery: 0.3, style: 'slashL', knock: 16 }], lungeRange: 30, lungeDist: 20, lungeSpeed: 110, stepSpeed: 40, reach: 11, width: 12, stun: 0.2, superArmor: false, guardBreak: false, color: 0xd9b24c, bladeScale: [0.7, 0.6, 0.7] },
   },
 };
 export const SLOTS = ['melee', 'vulcan', 'ranged'];      // the order the 1 / 2 / 3 keys and the HUD use
 export const COMBAT = {
-  hp: 1000,
+  hp: 1200,
   switchDraw: 0.3,        // seconds after a switch before the new weapon can attack
   switchCooldown: 2.5,    // seconds before switching again
   guardMul: 0.5,
@@ -77,14 +77,18 @@ export const COMBAT = {
 };
 
 export const STAGES = {
-  city: { id: 'city', name: 'Skyline City', zh: '天際城', gravity: 32, blocks: 8, pitch: 100, street: 30, minHeight: 25, maxHeight: 130, stepHeight: 45 },
+  // dusk: the match starts in late afternoon (start, 0 = noon … 1 = night) and reaches night after toNight seconds.
+  city: { id: 'city', name: 'Skyline City', zh: '天際城', gravity: 32, blocks: 8, pitch: 120, street: 44, minHeight: 25, maxHeight: 130, stepHeight: 45, dusk: { start: 0.08, toNight: 150 } },
 };
 
 export const CAMERA = {
-  tp: { distance: 42, pivotHeight: 14, radius: 2.5, fov: 55 },
+  tp: { distance: 44, pivotHeight: 14, radius: 2.5, fov: 55 },
+  // Lock-on: behind and above the player, pulling back and up as the opponent gets farther so both stay in frame.
+  lock: { distance: 42, height: 18, farDistance: 30, farHeight: 24, lookWeight: 0.42, pivotHeight: 14, fov: 58 },
   fp: { eyeHeight: 16, forward: 3, fov: 40 },
   blend: 0.22,
-  sensitivity: 0.0022,
+  pitchDefault: -0.32,
+  sensitivity: 0.0012,          // radians per pixel at the 1.0 slider setting
   keyLookRate: { yaw: 2.4, pitch: 1.6 },
   pitchLimits: [-1.2, 1.1],
 };

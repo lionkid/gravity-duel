@@ -20,6 +20,7 @@
   body.playing #game { cursor: none; }
 
   #hud { position: fixed; inset: 0; pointer-events: none; font-variant-numeric: tabular-nums; }
+  #hud.hidden { display: none; }
   .gauge { display: grid; grid-template-columns: 56px 1fr; align-items: center; gap: 8px; font: 12px var(--mono); letter-spacing: 0.08em; color: var(--muted); }
   .gauge .bar { height: 8px; background: rgba(255, 255, 255, 0.08); border: 1px solid var(--line); border-radius: 2px; overflow: hidden; }
   .gauge .bar i { display: block; height: 100%; width: 100%; background: var(--accent); transition: width 0.08s linear; }
@@ -68,7 +69,6 @@
   .ko.on { opacity: 1; }
   .ko .result { font: 72px var(--display); letter-spacing: 0.2em; color: var(--accent); text-shadow: 0 0 24px rgba(88, 224, 255, 0.6); }
   .ko.lose .result { color: var(--enemy); text-shadow: 0 0 24px rgba(255, 107, 107, 0.6); }
-  .ko .hint { color: var(--muted); font-size: 14px; letter-spacing: 0.1em; }
   .dmgnum { position: absolute; left: 0; top: 0; font: 22px var(--display); color: var(--gold); text-shadow: 0 0 10px rgba(0, 0, 0, 0.9), 0 0 4px rgba(217, 178, 76, 0.6); opacity: 0; transform: translate(-50%, 0); }
   .dmgnum.heavy { font-size: 32px; color: #fff; }
   .dmgnum.me { color: var(--enemy); }
@@ -76,12 +76,32 @@
   @keyframes dmgpop { 0% { opacity: 1; transform: translate(-50%, 0) scale(1.5); } 20% { transform: translate(-50%, -14px) scale(1); } 100% { opacity: 0; transform: translate(-50%, -52px) scale(0.9); } }
   .debug { position: absolute; left: 16px; top: calc(96px + env(safe-area-inset-top, 0px)); font: 12px var(--mono); color: var(--muted); white-space: pre; text-shadow: 0 1px 2px #000; }
 
-  #overlay { position: fixed; inset: 0; display: grid; place-items: center; background: radial-gradient(ellipse at center, rgba(10, 13, 24, 0.55), rgba(10, 13, 24, 0.9)); cursor: pointer; overflow: auto; }
-  #overlay.hidden { display: none; }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 22px 26px; width: min(520px, calc(100vw - 32px)); box-sizing: border-box; backdrop-filter: blur(6px); }
+  /* Menus: one panel in the middle of the screen, the live city behind it. */
+  #screens { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; box-sizing: border-box; overflow: auto; background: radial-gradient(ellipse at center, rgba(10, 13, 24, 0.35), rgba(10, 13, 24, 0.85)); }
+  #screens[hidden] { display: none; }
+  #screens[data-screen="pause"], #screens[data-screen="ko"] { background: rgba(10, 13, 24, 0.55); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 22px 26px; width: min(560px, 100%); box-sizing: border-box; backdrop-filter: blur(6px); }
+  .panel.narrow { width: min(380px, 100%); text-align: center; }
   .panel h1 { font: 34px var(--display); margin: 0; letter-spacing: 0.06em; color: var(--fg); text-wrap: balance; }
   .panel h1 span { display: block; font-size: 18px; color: var(--accent); letter-spacing: 0.4em; margin-top: 2px; }
-  .panel .sub { color: var(--muted); margin: 8px 0 0; font-size: 13px; }
+  .panel h2 { font: 18px var(--display); letter-spacing: 0.12em; margin: 16px 0 0; color: var(--fg); }
+  .panel h2.big { font-size: 54px; letter-spacing: 0.2em; margin: 4px 0 0; }
+  .panel h2.win { color: var(--accent); text-shadow: 0 0 24px rgba(88, 224, 255, 0.6); }
+  .panel h2.lose { color: var(--enemy); text-shadow: 0 0 24px rgba(255, 107, 107, 0.6); }
+  .panel .sub { color: var(--muted); margin: 8px 0 0; font-size: 13px; line-height: 1.5; }
+  .menu { display: grid; gap: 8px; margin: 16px 0 0; }
+  .mbtn { pointer-events: auto; cursor: pointer; font: 16px var(--body); color: var(--fg); background: rgba(255, 255, 255, 0.04); border: 1px solid var(--line); border-radius: 6px; padding: 10px 16px; text-align: left; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .panel.narrow .mbtn { justify-content: center; }
+  .mbtn small { color: var(--muted); font-size: 12px; font-weight: 400; }
+  .mbtn:hover { border-color: var(--muted); }
+  .mbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .mbtn:disabled { opacity: 0.45; cursor: default; }
+  .mbtn.primary { border-color: var(--accent); color: var(--accent); background: rgba(88, 224, 255, 0.08); }
+  .mbtn.on { border-color: var(--gold); color: var(--gold); }
+  .mbtn.small { display: inline-flex; font-size: 12px; padding: 3px 10px; margin-left: 6px; vertical-align: middle; }
+  .row-end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+  .foot { color: var(--muted); font-size: 12px; margin: 14px 0 0; }
+  .note { color: var(--warn); font-size: 13px; margin: 12px 0 0; }
   .picker { display: grid; gap: 8px; margin: 14px 0 6px; }
   .picker .row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
   .picker .rowlabel { color: var(--muted); font-size: 13px; width: 40px; }
@@ -91,12 +111,15 @@
   .picker .opt.on { border-color: var(--accent); color: var(--accent); background: rgba(88, 224, 255, 0.08); }
   .pickdesc { color: var(--muted); font-size: 12px; margin: 0 0 4px; min-height: 2.4em; }
   .cpu { color: var(--gold); font-size: 13px; margin: 0; }
-  .panel .cta { margin: 14px 0 12px; font-size: 18px; color: var(--gold); }
-  .keys { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; margin: 0; font-size: 12px; }
+  .settings { display: grid; grid-template-columns: auto 1fr 4em; align-items: center; gap: 12px; margin: 14px 0 0; font-size: 13px; color: var(--muted); }
+  .settings input[type="range"] { min-width: 0; accent-color: var(--accent); }
+  .settings input[type="checkbox"] { justify-self: start; width: 18px; height: 18px; accent-color: var(--accent); }
+  .settings .val { font-family: var(--mono); color: var(--fg); text-align: right; }
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 14px 0 0; font-size: 13px; }
   .keys dt { color: var(--muted); }
   .keys dd { margin: 0; font-family: var(--mono); }
-  .panel .note { color: var(--warn); font-size: 13px; min-height: 1em; margin: 10px 0 0; }
-  @media (max-width: 480px) { .panel h1 { font-size: 26px; } .top, .gauges { width: 46vw; } .slot { min-width: 110px; } }
+  .rules { color: var(--muted); font-size: 13px; line-height: 1.55; margin: 14px 0 0; padding-left: 18px; }
+  @media (max-width: 480px) { .panel h1 { font-size: 26px; } .panel h2.big { font-size: 40px; } .top, .gauges { width: 46vw; } .slot { min-width: 110px; } }
   @media (prefers-reduced-motion: reduce) { .enemy, .reticle, .lost, .crosshair, .ko, .msg { transition: none; } }
 </style>
 <script type="importmap">
@@ -106,18 +129,7 @@
 <body>
 <canvas id="game"></canvas>
 <div id="hud"></div>
-<div id="overlay">
-  <div class="panel">
-    <h1>GRAVITY DUEL<span>SKYLINE</span></h1>
-    <p class="sub">M2：選好武裝與裝甲，點一下開始。火神砲是預設武器，1 / 2 / 3 切換，按住右鍵用遠程武器瞄準。</p>
-    <div class="picker"></div>
-    <p class="pickdesc"></p>
-    <p class="cpu"></p>
-    <p class="cta">點一下開始</p>
-    <dl class="keys"></dl>
-    <p class="note"></p>
-  </div>
-</div>
+<div id="screens" hidden></div>
 <script type="module" src="./main.js"></script>
 </body>
 </html>
