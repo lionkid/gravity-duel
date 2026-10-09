@@ -142,7 +142,7 @@ await page.close();
 }
 
 // Postcard views (with bloom): the north ramp and deck from the street, the skyline from above, and the moon.
-for (const [name, q] of [['06-highway', 'pos=0,0,40&look=3.14159,-0.05'], ['07-skyline', 'pos=-60,180,120&look=0.6,-0.55'], ['13-moon', 'stage=moon&pos=0,0,40&look=3.14159,-0.02'], ['14-moon-sky', 'stage=moon&pos=-40,90,120&look=0.5,-0.3']]) {
+for (const [name, q] of [['06-highway', 'pos=0,0,40&look=3.14159,-0.05'], ['07-skyline', 'pos=-60,180,120&look=0.6,-0.55'], ['13-moon', 'stage=moon&pos=0,0,40&look=3.14159,-0.02'], ['14-moon-sky', 'stage=moon&dummy=idle&pos=480,100,480&look=0.25,0.5']]) {
   const p2 = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   p2.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   await p2.goto(`http://127.0.0.1:${port}/games/skyline/?seed=7&${q}`, { timeout: 60000 });

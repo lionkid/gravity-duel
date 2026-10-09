@@ -8,7 +8,7 @@ import { makeRng } from '../core/rng.js';
 
 const DEFAULT_PALETTE = {
   ground: 0x15181f, road: 0x1d222c, lane: 0x7d8696, kerb: 0x2a3040,
-  concrete: 0x5a6378, rail: 0x8893a6, fence: 0x58e0ff, lamp: 0xffe2b0, post: 0x1b1f2a,
+  concrete: 0x5a6378, rail: 0x8893a6, fence: 0x58e0ff, fenceOpacity: 0.08, lamp: 0xffe2b0, post: 0x1b1f2a,
   buildings: [0x2b3346, 0x343c52, 0x3d4154, 0x283447, 0x3a3348],
 };
 
@@ -25,7 +25,8 @@ const LUNAR = { sky: [0x02030a, 0x0a1026, 0x020305], sun: { color: 0xfff6e8, int
 export const THEMES = {
   city: { palette: DEFAULT_PALETTE, phases: PHASES },
   moon: {
-    palette: Object.assign({}, DEFAULT_PALETTE, { ground: 0x44464c, road: 0x35373d, lane: 0x8d93a0, kerb: 0x3a3c42, concrete: 0x6b6f7a, rail: 0x9aa3b2, lamp: 0xd8ecff, rock: 0x55575d, buildings: [0x3b4250, 0x454c5c, 0x4d4a56, 0x3a4652, 0x50545f] }),
+    // Against a black sky the arena fence would read as a glowing horizon, so it is barely there.
+    palette: Object.assign({}, DEFAULT_PALETTE, { ground: 0x44464c, road: 0x35373d, lane: 0x8d93a0, kerb: 0x3a3c42, concrete: 0x6b6f7a, rail: 0x9aa3b2, lamp: 0xd8ecff, rock: 0x55575d, fence: 0x2d8aa8, fenceOpacity: 0.025, buildings: [0x3b4250, 0x454c5c, 0x4d4a56, 0x3a4652, 0x50545f] }),
     phases: [Object.assign({ t: 0 }, LUNAR), Object.assign({ t: 0.5 }, LUNAR), Object.assign({ t: 1 }, LUNAR)],
     earth: { dir: [0.35, 0.5, -0.75], size: 0.1, sun: [0.5, 0.8, -0.3] },
     craters: 36,
@@ -121,7 +122,7 @@ export function buildStageVisual(scene, stage, options = {}) {
   if (vis.lanes && vis.lanes.length) group.add(buildDashes(vis.lanes, pal));
 
   // The arena fence: faint glowing walls at the bounds.
-  const fenceMat = new THREE.MeshBasicMaterial({ color: pal.fence, transparent: true, opacity: 0.08, side: THREE.DoubleSide, depthWrite: false });
+  const fenceMat = new THREE.MeshBasicMaterial({ color: pal.fence, transparent: true, opacity: pal.fenceOpacity == null ? 0.08 : pal.fenceOpacity, side: THREE.DoubleSide, depthWrite: false });
   const fh = 120;
   const fence = new THREE.Group();
   const addWall = (w, x, z, ry) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, fh), fenceMat); m.position.set(x, groundY + fh / 2, z); m.rotation.y = ry; fence.add(m); };
