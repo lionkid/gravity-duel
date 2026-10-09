@@ -46,18 +46,20 @@ export const ARMORS = {
 };
 export const WEAPONS = {
   // Hip-fired straight ahead along the body, level: no aiming, so height differences beat it.
-  vulcan: { id: 'vulcan', zh: '火神砲', kind: 'light', dmg: 6, rate: 15, spread: 0.0436, range: 150, heatTime: 3, cool: 0.6, overheatUntil: 0.4, stun: 0.03, knock: 1, color: 0xffd080 },
+  // A stream of small rockets: visible in flight, a little pop on impact.
+  vulcan: { id: 'vulcan', zh: '火神砲', kind: 'light', dmg: 11, rate: 8, spread: 0.05, range: 150, speed: 220, gravityScale: 0.15, heatTime: 3, cool: 0.6, overheatUntil: 0.4, stun: 0.04, knock: 4, color: 0xffb060, look: 'rocketS' },
   // Fired only while aiming in first person, along the view angles.
   ranged: {
-    normal: { id: 'rifle', zh: '光束步槍', kind: 'ranged', dmg: 70, interval: 0.8, speed: 600, gravityScale: 0, energy: 30, energyMax: 100, regen: 18, zoomFov: 40, aimMoveMul: 0.6, ttl: 2, stun: 0.25, knock: 6, color: 0x58e0ff },
-    ranged: { id: 'longrifle', zh: '長距離步槍', kind: 'ranged', dmg: 150, interval: 2.0, speed: 900, gravityScale: 0, energy: 45, energyMax: 100, regen: 15, zoomFov: 30, aimMoveMul: 0.4, ttl: 2, stun: 0.45, knock: 14, color: 0xa0ffea },
-    melee: { id: 'handcannon', zh: '手砲', kind: 'ranged', dmg: 40, interval: 0.5, speed: 260, gravityScale: 0.5, energy: 15, energyMax: 100, regen: 25, zoomFov: 45, aimMoveMul: 0.7, ttl: 3, stun: 0.15, knock: 5, color: 0xffb060 },
+    normal: { id: 'rocket', zh: '火箭砲', kind: 'ranged', dmg: 80, interval: 0.9, speed: 300, gravityScale: 0.1, energy: 30, energyMax: 100, regen: 18, zoomFov: 40, aimMoveMul: 0.6, ttl: 2.5, stun: 0.35, knock: 16, color: 0xff9a4a, look: 'rocketM' },
+    ranged: { id: 'longrifle', zh: '長距離步槍', kind: 'ranged', dmg: 150, interval: 2.0, speed: 900, gravityScale: 0, energy: 45, energyMax: 100, regen: 15, zoomFov: 30, aimMoveMul: 0.4, ttl: 2, stun: 0.45, knock: 20, color: 0xa0ffea, look: 'bolt' },
+    melee: { id: 'handcannon', zh: '手砲', kind: 'ranged', dmg: 40, interval: 0.5, speed: 260, gravityScale: 0.5, energy: 15, energyMax: 100, regen: 25, zoomFov: 45, aimMoveMul: 0.7, ttl: 3, stun: 0.15, knock: 8, color: 0xffd27a, look: 'shell' },
   },
-  // Lock-on lunge then swing. combo lists the swings in order; reach/width is the hit box ahead.
+  // Lock-on lunge then swing. combo lists the swings in order (style: how the arm moves, knock: how
+  // far the hit throws); reach/width is the hit box ahead. Later swings step in so a combo connects.
   melee: {
-    normal: { id: 'saber', zh: '光劍', kind: 'melee', combo: [{ dmg: 120, windup: 0.12, active: 0.12, recovery: 0.25 }, { dmg: 120, windup: 0.1, active: 0.12, recovery: 0.25 }, { dmg: 180, windup: 0.18, active: 0.14, recovery: 0.4 }], lungeRange: 45, lungeDist: 30, lungeSpeed: 120, reach: 14, width: 14, stun: 0.35, knock: 12, superArmor: false, guardBreak: false, color: 0x58e0ff },
-    melee: { id: 'greatblade', zh: '巨劍', kind: 'melee', combo: [{ dmg: 320, windup: 0.35, active: 0.16, recovery: 0.55 }], lungeRange: 55, lungeDist: 40, lungeSpeed: 130, reach: 17, width: 18, stun: 0.6, knock: 25, superArmor: true, guardBreak: true, color: 0xff7a3d },
-    ranged: { id: 'knife', zh: '短刀', kind: 'melee', combo: [{ dmg: 90, windup: 0.08, active: 0.1, recovery: 0.2 }, { dmg: 90, windup: 0.08, active: 0.1, recovery: 0.3 }], lungeRange: 30, lungeDist: 20, lungeSpeed: 110, reach: 11, width: 12, stun: 0.2, knock: 6, superArmor: false, guardBreak: false, color: 0xd9b24c },
+    normal: { id: 'saber', zh: '光劍', kind: 'melee', combo: [{ dmg: 120, windup: 0.14, active: 0.14, recovery: 0.26, style: 'slashR', knock: 8 }, { dmg: 120, windup: 0.12, active: 0.14, recovery: 0.26, style: 'slashL', knock: 8 }, { dmg: 180, windup: 0.2, active: 0.16, recovery: 0.42, style: 'overhead', knock: 30 }], lungeRange: 45, lungeDist: 30, lungeSpeed: 120, stepSpeed: 40, reach: 14, width: 14, stun: 0.35, superArmor: false, guardBreak: false, color: 0x58e0ff, bladeScale: [1, 1, 1] },
+    melee: { id: 'greatblade', zh: '巨劍', kind: 'melee', combo: [{ dmg: 320, windup: 0.38, active: 0.18, recovery: 0.55, style: 'overhead', knock: 34 }], lungeRange: 55, lungeDist: 40, lungeSpeed: 130, stepSpeed: 40, reach: 17, width: 18, stun: 0.6, superArmor: true, guardBreak: true, color: 0xff7a3d, bladeScale: [1.8, 1.25, 1.8] },
+    ranged: { id: 'knife', zh: '短刀', kind: 'melee', combo: [{ dmg: 90, windup: 0.1, active: 0.12, recovery: 0.2, style: 'slashR', knock: 6 }, { dmg: 90, windup: 0.1, active: 0.12, recovery: 0.3, style: 'slashL', knock: 16 }], lungeRange: 30, lungeDist: 20, lungeSpeed: 110, stepSpeed: 40, reach: 11, width: 12, stun: 0.2, superArmor: false, guardBreak: false, color: 0xd9b24c, bladeScale: [0.7, 0.6, 0.7] },
   },
 };
 export const SLOTS = ['melee', 'vulcan', 'ranged'];      // the order the 1 / 2 / 3 keys and the HUD use

@@ -25,18 +25,20 @@ test('fighters lock on to each other when in view; F toggles lock-on off and on 
   assert.equal(a.lock, 2);
 });
 
-test('the vulcan sprays straight ahead: it hits a mech on the same level and misses one on a roof', () => {
+test('the vulcan fires small rockets straight ahead: they hit a mech on the same level and miss one on a roof', () => {
   const w = makeWorld({ p1: { z: 60 }, p2: { z: -40 } });
   const [a, b] = w.fighters;
   run(w, 60, (it) => { it.held.attack = true; });
+  const shots = eventsOf(w, 'shot').filter((e) => e.kind === 'vulcan').length;
+  assert.ok(shots >= 7 && shots <= 9, `about 8 rockets per second, got ${shots}`);
+  assert.ok(w.projectiles.some((p) => p.kind === 'vulcan'), 'rockets are in flight');
+  assert.ok(a.heat > 0.25 && a.heat < 0.45, `heat after a second of fire ${a.heat}`);
+  run(w, 45, () => {});                                   // 100 m at 220 m/s: the first ones arrive
   assert.ok(b.hp < b.hpMax, 'opponent 100 m ahead takes damage');
-  const n = eventsOf(w, 'tracer').length;
-  assert.ok(n >= 13 && n <= 17, `about 15 rounds per second, got ${n}`);
-  assert.ok(a.heat > 0.25 && a.heat < 0.45, `heat after a second ${a.heat}`);
   const w2 = makeWorld({ p1: { z: 60 }, p2: { z: -40 } });
   w2.fighters[1].pos.y = 40;
   w2.fighters[1].onGround = false;
-  run(w2, 18, (it) => { it.held.attack = true; }, (it) => { it.held.boost = true; });
+  run(w2, 60, (it) => { it.held.attack = true; }, (it) => { it.held.boost = true; });
   assert.equal(w2.fighters[1].hp, w2.fighters[1].hpMax, 'a mech 40 m up is out of the level spray');
 });
 
@@ -48,7 +50,7 @@ test('the vulcan overheats after three seconds and needs to cool down', () => {
   assert.equal(eventsOf(w, 'overheat').length, 1);
   clearEvents(w);
   run(w, 30, (it) => { it.held.attack = true; });
-  assert.equal(eventsOf(w, 'tracer').length, 0, 'no rounds while overheated');
+  assert.equal(eventsOf(w, 'shot').length, 0, 'no rounds while overheated');
   run(w, 60 * 1.5, () => {});
   assert.ok(!a.overheated, 'cooled below the limit');
 });
@@ -62,7 +64,7 @@ test('ranged weapons fire only while aiming, cost energy and hit where aimed', (
   assert.equal(w.projectiles.length, 0, 'no shot without aiming');
   const e0 = a.energy;
   run(w, 90, (it, i) => { it.held.aim = true; Object.assign(it.aim, aimAt(a, b)); if (i === 0) it.pressed.attack = true; });
-  assert.equal(b.hp, b.hpMax - WEAPONS.ranged.normal.dmg, `beam rifle damage, hp ${b.hp}`);
+  assert.equal(b.hp, b.hpMax - WEAPONS.ranged.normal.dmg, `rocket damage, hp ${b.hp}`);
   assert.ok(e0 - a.energy < WEAPONS.ranged.normal.energy && a.energy < WEAPONS.ranged.normal.energyMax, 'energy spent and regenerating');
   const hit = eventsOf(w, 'hit')[0];
   assert.ok(hit && hit.by === 1 && hit.kind === 'ranged');
@@ -79,16 +81,16 @@ test('shots are stopped by buildings', () => {
   assert.ok(imp && !imp.body && imp.x > 10 && imp.x < 40, `hit the wall at x=${imp && imp.x}`);
 });
 
-test('the hand cannon drops with gravity, the beam rifle does not', () => {
+test('the hand cannon drops with gravity, the sniper bolt does not', () => {
   const fire = (weapon) => {
     const w = makeWorld({ loadouts: { 1: { weapon } }, p1: { z: 60 }, p2: { z: 300 } });
     run(w, 30, toRanged);
     run(w, 60 * 2.5, (it, i) => { it.held.aim = true; it.aim.yaw = 0; it.aim.pitch = 0; if (i === 0) it.pressed.attack = true; });
     return eventsOf(w, 'impact')[0];
   };
-  const shell = fire('melee'), beam = fire('normal');
+  const shell = fire('melee'), bolt = fire('ranged');
   assert.ok(shell && shell.y < 1, `the shell lands on the street, y=${shell && shell.y}`);
-  assert.ok(beam && Math.abs(beam.y - (COMBAT.muzzleHeight + 2)) < 0.5, `the beam stays level, y=${beam && beam.y}`);
+  assert.ok(bolt && Math.abs(bolt.y - (COMBAT.muzzleHeight + 2)) < 0.5, `the bolt stays level, y=${bolt && bolt.y}`);
 });
 
 test('melee: lock on, lunge, three-hit combo', () => {
@@ -142,15 +144,16 @@ test('armour multiplies damage by kind', () => {
     const b = w.fighters[1];
     if (attack === 'melee') { run(w, 30, toMelee); run(w, 60, (it, i) => { if (i === 0) it.pressed.attack = true; }); }
     else if (attack === 'ranged') { run(w, 30, toRanged); run(w, 90, (it, i) => { it.held.aim = true; Object.assign(it.aim, aimAt(w.fighters[0], b)); if (i === 0) it.pressed.attack = true; }); }
-    else { run(w, 4, (it, i) => { it.held.attack = true; }); }
+    else { run(w, 40, (it, i) => { it.held.attack = true; }); }
     return eventsOf(w, 'hit')[0].amount;
   };
-  assert.equal(dmgWith('antiRanged', 'ranged'), Math.round(70 * ARMORS.antiRanged.ranged));
-  assert.equal(dmgWith('antiMelee', 'ranged'), Math.round(70 * ARMORS.antiMelee.ranged));
-  assert.equal(dmgWith('antiRanged', 'melee'), Math.round(120 * ARMORS.antiRanged.melee));
-  assert.equal(dmgWith('antiMelee', 'melee'), Math.round(120 * ARMORS.antiMelee.melee));
-  assert.equal(dmgWith('antiRanged', 'light'), Math.round(6 * ARMORS.antiRanged.light));
-  assert.equal(dmgWith('normal', 'light'), 6);
+  const R = WEAPONS.ranged.normal.dmg, M = WEAPONS.melee.normal.combo[0].dmg;
+  assert.equal(dmgWith('antiRanged', 'ranged'), Math.round(R * ARMORS.antiRanged.ranged));
+  assert.equal(dmgWith('antiMelee', 'ranged'), Math.round(R * ARMORS.antiMelee.ranged));
+  assert.equal(dmgWith('antiRanged', 'melee'), Math.round(M * ARMORS.antiRanged.melee));
+  assert.equal(dmgWith('antiMelee', 'melee'), Math.round(M * ARMORS.antiMelee.melee));
+  assert.equal(dmgWith('antiRanged', 'light'), Math.round(WEAPONS.vulcan.dmg * ARMORS.antiRanged.light));
+  assert.equal(dmgWith('normal', 'light'), WEAPONS.vulcan.dmg);
 });
 
 test('switching has a draw time and a cooldown', () => {
@@ -165,21 +168,21 @@ test('switching has a draw time and a cooldown', () => {
   assert.equal(a.active, 'vulcan');
   clearEvents(w);
   run(w, 10, (it) => { it.held.attack = true; });
-  assert.equal(eventsOf(w, 'tracer').length, 0, 'drawing: no fire yet');
+  assert.equal(eventsOf(w, 'shot').length, 0, 'drawing: no fire yet');
   run(w, 20, (it) => { it.held.attack = true; });
-  assert.ok(eventsOf(w, 'tracer').length > 0, 'fires once drawn');
+  assert.ok(eventsOf(w, 'shot').length > 0, 'fires once drawn');
 });
 
 test('KO ends the fight: the loser is dead, the winner recorded, no more damage', () => {
   const w = makeWorld({ p1: { z: 60 }, p2: { z: -40 } });
   const [a, b] = w.fighters;
   b.hp = 20;
-  run(w, 60, (it) => { it.held.attack = true; });
+  run(w, 90, (it) => { it.held.attack = true; });
   assert.ok(b.dead && b.hp === 0);
   assert.equal(w.winner, 1);
   assert.equal(eventsOf(w, 'ko').length, 1);
   const hits = eventsOf(w, 'hit').length;
-  run(w, 30, (it) => { it.held.attack = true; });
+  run(w, 60, (it) => { it.held.attack = true; });
   assert.equal(eventsOf(w, 'hit').length, hits, 'the dead take no more hits');
 });
 

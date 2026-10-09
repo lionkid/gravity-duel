@@ -60,16 +60,21 @@ export const AX01 = {
         { shape: 'box', size: [2.6, 3.8, 2.8], pos: [0, -6.8, -0.2], mat: 'armor' },          // forearm
         { shape: 'box', size: [2.8, 1.0, 3.0], pos: [0, -5.4, -0.2], mat: 'trim' },
         { shape: 'box', size: [1.8, 1.8, 1.8], pos: [0, -9.3, -0.3], mat: 'dark' },           // hand
-        // Weapons in the right hand; the animator shows the one in use.
-        { name: 'rifle', shape: 'group', pos: [0, -9.3, -0.3], only: 'R', children: [
-          { shape: 'box', size: [1.3, 1.6, 7.0], pos: [0, 0.2, -3.2], mat: 'armor2' },
-          { shape: 'cyl', size: [0.35, 0.35, 5.0, 8], pos: [0, 0.6, -8.5], rot: [Math.PI / 2, 0, 0], mat: 'dark' },
-          { shape: 'box', size: [0.6, 0.8, 2.0], pos: [0, 1.4, -2.0], mat: 'trim' },                 // sight
-          { shape: 'box', size: [0.5, 0.3, 1.2], pos: [0, 1.0, -7.4], mat: 'glow' },                  // muzzle lamp
+        // Weapons in the right hand; the animator shows the one in use. Both point along -Z (forward).
+        { name: 'rifle', shape: 'group', pos: [0, -9.3, -0.3], only: 'R', children: [               // rocket launcher
+          { shape: 'cyl', size: [1.0, 1.0, 8.0, 12], pos: [0, 0.8, -3.6], rot: [Math.PI / 2, 0, 0], mat: 'armor2' },
+          { shape: 'cyl', size: [1.25, 1.25, 1.2, 12], pos: [0, 0.8, -7.6], rot: [Math.PI / 2, 0, 0], mat: 'trim' },   // muzzle ring
+          { shape: 'cyl', size: [0.7, 0.7, 0.4, 12], pos: [0, 0.8, -8.2], rot: [Math.PI / 2, 0, 0], mat: 'glow' },     // loaded warhead glow
+          { shape: 'box', size: [1.6, 1.8, 2.6], pos: [0, -0.8, -1.6], mat: 'armor' },                                  // magazine
+          { shape: 'box', size: [0.7, 0.9, 2.4], pos: [0, 2.2, -1.4], mat: 'trim' },                                    // sight
         ] },
-        { name: 'blade', shape: 'group', pos: [0, -9.3, -0.3], only: 'R', children: [
-          { shape: 'cyl', size: [0.45, 0.5, 2.2, 8], pos: [0, 0, 0], mat: 'trim' },                   // hilt
-          { shape: 'box', size: [0.5, 13, 1.6], pos: [0, -7.5, 0], mat: 'glow' },                     // the blade, hanging down at rest
+        { name: 'blade', shape: 'group', pos: [0, -9.3, -0.3], only: 'R', children: [               // energy sword
+          { shape: 'cyl', size: [0.5, 0.55, 2.6, 8], pos: [0, 0, 1.2], rot: [Math.PI / 2, 0, 0], mat: 'trim' },        // hilt
+          { shape: 'box', size: [2.8, 2.2, 0.5], pos: [0, 0.1, -0.2], mat: 'armor2' },                                  // guard
+          { shape: 'box', size: [0.55, 2.0, 13.5], pos: [0, 0.1, -7.6], mat: 'glow' },                                  // blade
+          { shape: 'box', size: [0.06, 3.6, 14.2], pos: [0, 0.1, -7.6], mat: 'aura' },                                  // glow sheet
+          { name: 'bladeBase', shape: 'group', pos: [0, 0.1, -0.9] },
+          { name: 'bladeTip', shape: 'group', pos: [0, 0.1, -14.4] },
         ] },
       ] },
       // Backpack and thruster wings.

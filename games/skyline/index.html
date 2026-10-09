@@ -69,6 +69,11 @@
   .ko .result { font: 72px var(--display); letter-spacing: 0.2em; color: var(--accent); text-shadow: 0 0 24px rgba(88, 224, 255, 0.6); }
   .ko.lose .result { color: var(--enemy); text-shadow: 0 0 24px rgba(255, 107, 107, 0.6); }
   .ko .hint { color: var(--muted); font-size: 14px; letter-spacing: 0.1em; }
+  .dmgnum { position: absolute; left: 0; top: 0; font: 22px var(--display); color: var(--gold); text-shadow: 0 0 10px rgba(0, 0, 0, 0.9), 0 0 4px rgba(217, 178, 76, 0.6); opacity: 0; transform: translate(-50%, 0); }
+  .dmgnum.heavy { font-size: 32px; color: #fff; }
+  .dmgnum.me { color: var(--enemy); }
+  .dmgnum.on { animation: dmgpop 0.9s ease-out forwards; }
+  @keyframes dmgpop { 0% { opacity: 1; transform: translate(-50%, 0) scale(1.5); } 20% { transform: translate(-50%, -14px) scale(1); } 100% { opacity: 0; transform: translate(-50%, -52px) scale(0.9); } }
   .debug { position: absolute; left: 16px; top: calc(96px + env(safe-area-inset-top, 0px)); font: 12px var(--mono); color: var(--muted); white-space: pre; text-shadow: 0 1px 2px #000; }
 
   #overlay { position: fixed; inset: 0; display: grid; place-items: center; background: radial-gradient(ellipse at center, rgba(10, 13, 24, 0.55), rgba(10, 13, 24, 0.9)); cursor: pointer; overflow: auto; }

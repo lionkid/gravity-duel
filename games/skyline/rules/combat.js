@@ -115,14 +115,22 @@ export function stepCombat(world, f, it, dt) {
     }
     if (m.stage === 'windup') {
       out.lockMove = true;
-      if (e && f.lock) out.face = dirToYaw(e.pos.x - f.pos.x, e.pos.z - f.pos.z);
-      if (m.t >= swing.windup) { m.stage = 'active'; m.t = 0; m.hit = false; emit(world, 'slash', { id: f.id, x: f.pos.x, y: f.pos.y, z: f.pos.z, yaw: f.yaw, combo: m.combo, color: w.color }); }
+      if (e && f.lock) {
+        out.face = dirToYaw(e.pos.x - f.pos.x, e.pos.z - f.pos.z);
+        // Later swings step toward the target so a combo keeps connecting after the knockback.
+        const d = distXZ(f.pos, e.pos);
+        if (m.combo > 0 && d > w.reach * 0.7 && d < w.lungeRange) {
+          const dx = e.pos.x - f.pos.x, dz = e.pos.z - f.pos.z;
+          out.lunge = { x: dx / d * w.stepSpeed, z: dz / d * w.stepSpeed };
+        }
+      }
+      if (m.t >= swing.windup) { m.stage = 'active'; m.t = 0; m.hit = false; emit(world, 'slash', { id: f.id, x: f.pos.x, y: f.pos.y, z: f.pos.z, yaw: f.yaw, combo: m.combo, style: swing.style, color: w.color }); }
     }
     if (m.stage === 'active') {
       out.lockMove = true;
       if (!m.hit && e && !e.dead && meleeHits(f, e, w)) {
         m.hit = true;
-        applyDamage(world, e, swing.dmg, 'melee', f, { stun: w.stun, knock: w.knock, guardBreak: w.guardBreak });
+        applyDamage(world, e, swing.dmg, 'melee', f, { stun: w.stun, knock: swing.knock == null ? w.knock : swing.knock, guardBreak: w.guardBreak, melee: true, final: m.combo === w.combo.length - 1 });
       }
       if (m.t >= swing.active) { m.stage = 'recovery'; m.t = 0; }
     }
@@ -161,29 +169,24 @@ export function stepCombat(world, f, it, dt) {
 
 function fireVulcan(world, f, dt) {
   const v = WEAPONS.vulcan;
-  const e = enemyOf(world, f);
   f.vulcanCd -= dt;
   while (f.vulcanCd <= 0 && !f.overheated) {
     f.vulcanCd += 1 / v.rate;
     f.heat += 1 / (v.rate * v.heatTime);
     if (f.heat >= 1) { f.heat = 1; f.overheated = true; emit(world, 'overheat', { id: f.id }); }
-    // Straight ahead along the body, level, with a little scatter.
+    // Straight ahead along the body, level, with a little scatter; alternating chest launchers.
     const yaw = f.yaw + (world.rnd() - 0.5) * 2 * v.spread;
     const pitch = (world.rnd() - 0.5) * 2 * v.spread;
     const dir = aimToDir(yaw, pitch);
-    const fwd = yawToDir(f.yaw);
-    const from = { x: f.pos.x + fwd.x * 6, y: f.pos.y + COMBAT.muzzleHeight, z: f.pos.z + fwd.z * 6 };
-    const to = { x: from.x + dir.x * v.range, y: from.y + dir.y * v.range, z: from.z + dir.z * v.range };
-    let tEnd = 1, hitBody = false;
-    const wall = raycast(world.statics, from, to);
-    if (wall) tEnd = wall.t;
-    if (e && !e.dead) {
-      const hb = segmentBody(from, to, e);
-      if (hb && hb.t < tEnd) { tEnd = hb.t; hitBody = true; }
-    }
-    const end = { x: from.x + (to.x - from.x) * tEnd, y: from.y + (to.y - from.y) * tEnd, z: from.z + (to.z - from.z) * tEnd };
-    emit(world, 'tracer', { id: f.id, x0: from.x, y0: from.y, z0: from.z, x1: end.x, y1: end.y, z1: end.z, hit: hitBody, wall: !!wall && !hitBody, color: v.color });
-    if (hitBody) applyDamage(world, e, v.dmg, 'light', f, { stun: v.stun, knock: v.knock, x: end.x, y: end.y, z: end.z });
+    const fwd = yawToDir(f.yaw), right = { x: -fwd.z, z: fwd.x };
+    const side = (f.vulcanSide = -(f.vulcanSide || 1));
+    const from = { x: f.pos.x + fwd.x * 5 + right.x * side * 3, y: f.pos.y + COMBAT.muzzleHeight + 1, z: f.pos.z + fwd.z * 5 + right.z * side * 3 };
+    world.projectiles.push({
+      id: ++world.nextId, owner: f.id, kind: v.id, look: v.look, dmgKind: v.kind, dmg: v.dmg, stun: v.stun, knock: v.knock, color: v.color,
+      pos: { ...from }, prev: { ...from }, vel: { x: dir.x * v.speed, y: dir.y * v.speed, z: dir.z * v.speed },
+      gravityScale: v.gravityScale, ttl: v.range / v.speed, speed: v.speed,
+    });
+    emit(world, 'shot', { id: f.id, kind: v.id, x: from.x, y: from.y, z: from.z, dx: dir.x, dy: dir.y, dz: dir.z, color: v.color });
     f.attacked = world.tick;
   }
 }
@@ -194,12 +197,12 @@ function fireRanged(world, f, w) {
   const dir = aimToDir(f.aim.yaw, f.aim.pitch);
   const from = { x: f.pos.x + dir.x * 6, y: f.pos.y + COMBAT.muzzleHeight + 2 + dir.y * 6, z: f.pos.z + dir.z * 6 };
   world.projectiles.push({
-    id: ++world.nextId, owner: f.id, kind: w.id, dmgKind: w.kind, dmg: w.dmg, stun: w.stun, knock: w.knock, color: w.color,
+    id: ++world.nextId, owner: f.id, kind: w.id, look: w.look, dmgKind: w.kind, dmg: w.dmg, stun: w.stun, knock: w.knock, color: w.color,
     pos: { ...from }, prev: { ...from }, vel: { x: dir.x * w.speed, y: dir.y * w.speed, z: dir.z * w.speed },
     gravityScale: w.gravityScale, ttl: w.ttl, speed: w.speed,
   });
   f.attacked = world.tick;
-  emit(world, 'shot', { id: f.id, kind: w.id, x: from.x, y: from.y, z: from.z, color: w.color });
+  emit(world, 'shot', { id: f.id, kind: w.id, x: from.x, y: from.y, z: from.z, dx: dir.x, dy: dir.y, dz: dir.z, color: w.color });
 }
 
 // Projectiles fly, drop if they are solid shells, and hit the first thing on their path.
@@ -227,7 +230,7 @@ export function stepProjectiles(world, dt) {
         const shooter = world.fighters.find((f) => f.id === p.owner);
         applyDamage(world, victim, p.dmg, p.dmgKind, shooter, { stun: p.stun, knock: p.knock, x: hx, y: hy, z: hz });
       }
-      emit(world, 'impact', { x: hx, y: hy, z: hz, color: p.color, body: !!victim, kind: p.kind });
+      emit(world, 'impact', { x: hx, y: hy, z: hz, color: p.color, body: !!victim, kind: p.kind, look: p.look, dx: p.vel.x, dy: p.vel.y, dz: p.vel.z });
       world.projectiles.splice(i, 1);
     }
   }
@@ -256,11 +259,12 @@ export function applyDamage(world, t, amount, kind, by, o = {}) {
     if (o.knock && by) {
       const dx = t.pos.x - by.pos.x, dz = t.pos.z - by.pos.z, d = Math.hypot(dx, dz) || 1;
       t.vel.x += dx / d * o.knock; t.vel.z += dz / d * o.knock;
-      if (kind === 'melee') t.vel.y = Math.max(t.vel.y, o.knock * 0.3);
+      if (kind === 'melee') { t.vel.y = Math.max(t.vel.y, o.knock * (o.final ? 0.45 : 0.25)); t.onGround = false; }
     }
     if (t.melee && kind !== 'light' && !superArmor) t.melee = null;      // a solid hit interrupts a swing
   }
-  emit(world, 'hit', { id: t.id, by: by ? by.id : 0, amount: dmg, kind, guard: guarded, broke, superArmor,
+  const fromYaw = by ? dirToYaw(by.pos.x - t.pos.x, by.pos.z - t.pos.z) : t.yaw;
+  emit(world, 'hit', { id: t.id, by: by ? by.id : 0, amount: dmg, kind, guard: guarded, broke, superArmor, melee: !!o.melee, final: !!o.final, fromYaw,
     x: o.x == null ? t.pos.x : o.x, y: o.y == null ? t.pos.y + 12 : o.y, z: o.z == null ? t.pos.z : o.z });
   if (t.hp <= 0) {
     t.dead = true; t.melee = null; t.guard = false; t.aiming = false; t.lock = 0;

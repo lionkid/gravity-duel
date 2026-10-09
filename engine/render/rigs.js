@@ -71,6 +71,26 @@ export function createLockOnRig(camera, { distance = 40, height = 9, pivotHeight
   };
 }
 
+// Camera shake: kick() adds energy, apply() jitters the camera along its own right and up axes and
+// lets the energy die off. Call apply after the rig has placed the camera.
+export function createShake({ decay = 9, max = 2.5 } = {}) {
+  let amp = 0, t = 0;
+  const right = new THREE.Vector3(), up = new THREE.Vector3();
+  return {
+    kick(a) { amp = Math.min(max, amp + a); },
+    apply(camera, dt) {
+      if (amp <= 0.01) { amp = 0; return; }
+      t += dt;
+      right.set(1, 0, 0).applyQuaternion(camera.quaternion);
+      up.set(0, 1, 0).applyQuaternion(camera.quaternion);
+      const a = amp * 0.8;
+      camera.position.addScaledVector(right, Math.sin(t * 61) * a).addScaledVector(up, Math.cos(t * 83) * a * 0.7);
+      camera.rotateZ(Math.sin(t * 47) * amp * 0.012);
+      amp *= Math.exp(-decay * dt);
+    },
+  };
+}
+
 // Through the mech's eyes: at head height, a little forward, looking along the view angles.
 export function createFirstPersonRig(camera, { eyeHeight = 16, forward = 3, fov = 40 } = {}) {
   return {

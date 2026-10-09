@@ -4,24 +4,24 @@
 import * as THREE from 'three';
 import { createLoop } from '../../engine/core/loop.js';
 import { drain } from '../../engine/core/events.js';
-import { lerpAngle, dirToAim, distXZ } from '../../engine/core/math.js';
+import { lerpAngle, dirToAim, distXZ, angleDiff } from '../../engine/core/math.js';
 import { createKeyboard } from '../../engine/input/keyboard.js';
 import { createMouse } from '../../engine/input/mouse.js';
 import { createMapper } from '../../engine/input/bindings.js';
 import { IDLE_INTENT, createIntent, clearIntent } from '../../engine/input/intent.js';
 import { createRenderApp } from '../../engine/render/app.js';
-import { createThirdPersonRig, createFirstPersonRig, createLockOnRig, createCameraBlender } from '../../engine/render/rigs.js';
+import { createThirdPersonRig, createFirstPersonRig, createLockOnRig, createCameraBlender, createShake } from '../../engine/render/rigs.js';
 import { buildStageVisual, setNightEnvironment } from '../../engine/render/world-builder.js';
 import { buildMech } from '../../engine/render/mech-builder.js';
 import { animateMech } from '../../engine/render/mech-anim.js';
 import { createBar, el, project } from '../../engine/render/hud.js';
 import { createSky } from '../../engine/render/sky.js';
-import { createBlobShadow, createTracers, createSparks, createSlashes, createProjectileView } from '../../engine/render/fx.js';
+import { createBlobShadow, createSparks, createSlashes, createProjectileView, createFlashes, createBladeTrail } from '../../engine/render/fx.js';
 import { createPost } from '../../engine/render/post.js';
 import * as CFG from './config.js';
 import { generateCity } from './stages/city.js';
 import { createWorld, stepWorld } from './rules/world.js';
-import { weaponIn } from './rules/combat.js';
+import { weaponIn, meleeOf, rangedOf } from './rules/combat.js';
 import { AX01, withPalette } from './mechs/ax01.js';
 
 const params = new URLSearchParams(location.search);
@@ -55,10 +55,23 @@ const post = params.get('bloom') === '0' ? null : createPost(app, { strength: 0.
 const mechs = [buildMech(AX01), buildMech(withPalette(AX01, CFG.PALETTES.crimson, 'ax01-crimson'))];
 for (const m of mechs) app.scene.add(m.group);
 const shadows = mechs.map(() => { const s = createBlobShadow(7); app.scene.add(s.mesh); return s; });
-const tracers = createTracers(app.scene);
-const sparks = createSparks(app.scene);
+const sparks = createSparks(app.scene, { max: 768, size: 1.4 });
+const smoke = createSparks(app.scene, { max: 1024, size: 3.4 });
+const debris = createSparks(app.scene, { max: 256, size: 2.2 });
+const flashes = createFlashes(app.scene);
 const slashes = createSlashes(app.scene);
-const bolts = createProjectileView(app.scene);
+const bolts = createProjectileView(app.scene, { smoke, sparks });
+const trails = mechs.map((m) => createBladeTrail(app.scene, { color: m.design.palette.glow }));
+const shake = createShake();
+// Warm up every material once so the first shot, flash or trail does not stall on shader compilation.
+bolts.warm();
+app.renderer.compile(app.scene, app.camera);
+// Per-mech presentation state the animator reads: time since the last hit / shot.
+const mechFx = mechs.map(() => ({ hitT: Infinity, hitSide: 0, hitHeavy: false, firedT: Infinity, firedKind: '' }));
+let hitstopT = 0;
+const GUN_SCALE = { rocketM: [1.2, 1.2, 1.15], bolt: [0.75, 0.75, 1.6], shell: [1.1, 1.1, 0.7] };
+const FLASH = { vulcan: 1.6, rocket: 3.5, longrifle: 3, handcannon: 2.2 };
+const BOOM = { rocketS: 5, rocketM: 12, bolt: 6, shell: 7 };
 
 // Input and cameras.
 const keyboard = createKeyboard();
@@ -104,6 +117,17 @@ const ko = el('div', 'ko', hud);
 const koResult = el('div', 'result', ko);
 el('div', 'hint', ko, '按 R 再戰');
 const debug = el('div', 'debug', hud);
+const dmgNums = Array.from({ length: 12 }, () => el('div', 'dmgnum', hud));
+let dmgNext = 0;
+function showDamage(x, y, amount, heavy, mine) {
+  const d = dmgNums[dmgNext]; dmgNext = (dmgNext + 1) % dmgNums.length;
+  d.textContent = String(amount);
+  d.className = `dmgnum${heavy ? ' heavy' : ''}${mine ? ' me' : ''}`;
+  d.style.left = `${(x + (Math.random() - 0.5) * 30).toFixed(0)}px`;
+  d.style.top = `${(y + (Math.random() - 0.5) * 16).toFixed(0)}px`;
+  void d.offsetWidth;                                   // restart the animation
+  d.classList.add('on');
+}
 let showDebug = params.has('debug');
 let hitmarkT = 0, vignetteT = 0, msgT = 0;
 const showMsg = (text, t = 1.2) => { msg.textContent = text; msg.classList.add('on'); msgT = t; };
@@ -157,7 +181,9 @@ function startBattle() {
     m.flash = 0;
     m.materials.glow.emissiveIntensity = 2.2;
   });
-  for (const fx of [tracers, sparks, slashes, bolts]) fx.clear();
+  for (const fx of [sparks, smoke, debris, flashes, slashes, bolts, ...trails]) fx.clear();
+  for (const fx of mechFx) { fx.hitT = Infinity; fx.firedT = Infinity; }
+  hitstopT = 0;
   lastSeen = null;
   loadoutDirty = false;
   ko.classList.remove('on');
@@ -215,34 +241,67 @@ if (!mouse.state.supported) note.textContent = '這個瀏覽器沒有滑鼠鎖�
 window.addEventListener('keydown', (e) => { if (e.code === 'F3') { showDebug = !showDebug; e.preventDefault(); } });
 
 // ---------------------------------------------------------------- events → effects
+// Shake falls off with distance from the player's mech.
+function shakeAt(x, y, z, amount) {
+  const d = Math.hypot(x - me.pos.x, y - me.pos.y - 10, z - me.pos.z);
+  shake.kick(amount * Math.min(1, 40 / Math.max(10, d)));
+}
 function handleEvent(e) {
   switch (e.t) {
-    case 'tracer':
-      tracers.spawn(e.x0, e.y0, e.z0, e.x1, e.y1, e.z1, e.color);
-      if (e.wall) sparks.burst(e.x1, e.y1, e.z1, 0xffd080, 3, 12, 0.25);
+    case 'shot': {
+      flashes.spawn(e.x, e.y, e.z, e.color, FLASH[e.kind] || 4, 0.09);
+      sparks.burst(e.x, e.y, e.z, e.color, e.kind === 'vulcan' ? 4 : 10, 16, 0.2, 0, 0, { x: e.dx, y: e.dy, z: e.dz }, 1.5);
+      if (e.kind !== 'vulcan') smoke.burst(e.x, e.y, e.z, 0x9aa0ad, 6, 6, 0.6, -3, 2);
+      const fx = mechFx[e.id - 1];
+      if (fx) { fx.firedT = 0; fx.firedKind = e.kind; }
+      if (e.id === me.id) shake.kick(e.kind === 'vulcan' ? 0.12 : 0.45);
       break;
-    case 'shot': sparks.burst(e.x, e.y, e.z, e.color, 8, 10, 0.2, 0); break;
-    case 'impact': sparks.burst(e.x, e.y, e.z, e.color, e.body ? 28 : 16, e.body ? 40 : 25, 0.5); break;
-    case 'slash': slashes.spawn(e.x, e.y, e.z, e.yaw, e.color, e.combo); break;
+    }
+    case 'impact': {
+      const size = BOOM[e.look] || 6;
+      flashes.spawn(e.x, e.y, e.z, e.color, size * 0.7, 0.12);
+      flashes.spawn(e.x, e.y, e.z, 0xfff0d0, size * 0.3, 0.05);
+      sparks.burst(e.x, e.y, e.z, e.color, Math.round(size * 2.5), 12 + size * 2.5, 0.45, 50);
+      smoke.burst(e.x, e.y, e.z, 0x8a8f9a, Math.round(size), 4 + size * 0.6, 0.9, -3, 2);
+      if (!e.body) debris.burst(e.x, e.y, e.z, 0x6a7384, Math.round(size * 0.8), 14 + size, 0.8, 60);
+      shakeAt(e.x, e.y, e.z, size * 0.05);
+      break;
+    }
+    case 'slash': slashes.spawn(e.x, e.y, e.z, e.yaw, e.color, e.style); break;
     case 'hit': {
-      const m = mechs[e.id - 1];
+      const victim = world.fighters[e.id - 1];
+      const m = mechs[e.id - 1], fx = mechFx[e.id - 1];
       if (m) m.flash = 0.18;
-      sparks.burst(e.x, e.y, e.z, e.guard ? 0x8fb3ff : 0xffb070, e.guard ? 10 : 22, 35, 0.45);
-      if (e.by === me.id) hitmarkT = 0.12;
-      if (e.id === me.id) vignetteT = 0.35;
+      const heavy = e.final || e.amount >= 120;
+      if (fx && !e.guard) { fx.hitT = 0; fx.hitHeavy = heavy; fx.hitSide = victim ? Math.sign(angleDiff(victim.yaw, e.fromYaw)) : 0; }
+      const col = e.guard ? 0x8fb3ff : 0xffb070;
+      flashes.spawn(e.x, e.y, e.z, col, heavy ? 6 : 3.5, 0.1);
+      sparks.burst(e.x, e.y, e.z, col, e.guard ? 14 : heavy ? 60 : 30, heavy ? 55 : 38, 0.5, 45);
+      if (!e.guard) debris.burst(e.x, e.y, e.z, 0x9aa3b5, heavy ? 16 : 6, 20, 0.9, 70);
+      if (e.melee) hitstopT = Math.max(hitstopT, heavy ? 0.09 : 0.05);
+      if (e.by === me.id) { hitmarkT = 0.12; shake.kick(e.melee ? 0.35 : 0.15); }
+      if (e.id === me.id) { vignetteT = 0.4; shake.kick(heavy ? 1.2 : e.melee ? 0.7 : 0.3); }
+      const p = project(app.camera, e.x, e.y, e.z, app.size.w, app.size.h);
+      if (p.visible) showDamage(p.x, p.y, e.amount, heavy, e.id === me.id);
       if (e.broke) showMsg(e.id === me.id ? '防禦被打破' : '破防');
       break;
     }
     case 'ko': {
       const f = world.fighters[e.id - 1];
-      sparks.burst(f.pos.x, f.pos.y + 10, f.pos.z, 0xffe0a0, 180, 60, 1.4, 25);
+      flashes.spawn(f.pos.x, f.pos.y + 10, f.pos.z, 0xffe0a0, 30, 0.35);
+      sparks.burst(f.pos.x, f.pos.y + 10, f.pos.z, 0xffe0a0, 220, 60, 1.4, 25);
+      smoke.burst(f.pos.x, f.pos.y + 10, f.pos.z, 0x9aa0ad, 60, 18, 2.0, -2, 1.2);
+      debris.burst(f.pos.x, f.pos.y + 10, f.pos.z, 0x8a93a6, 40, 40, 1.6, 60);
+      shake.kick(1.5);
+      hitstopT = 0.12;
       koResult.textContent = e.by === me.id ? 'WIN' : 'LOSE';
       ko.classList.toggle('lose', e.by !== me.id);
       ko.classList.add('on');
       break;
     }
-    case 'land': if (e.hard) sparks.burst(e.x, e.y + 0.5, e.z, 0x8a8f9a, 24, 18, 0.6, 20); break;
+    case 'land': if (e.hard) { smoke.burst(e.x, e.y + 0.5, e.z, 0x8a8f9a, 24, 16, 0.7, 10, 2); shakeAt(e.x, e.y, e.z, 0.3); } break;
     case 'dash': sparks.burst(e.x, e.y + 8, e.z, 0x58e0ff, 12, 15, 0.3, 0); break;
+    case 'melee': if (e.lunge) { const f = world.fighters[e.id - 1]; sparks.burst(f.pos.x, f.pos.y + 10, f.pos.z, 0x58e0ff, 16, 18, 0.3, 0); } break;
     case 'overheat': if (e.id === me.id) showMsg('火神砲過熱'); break;
     case 'lock': if (e.id === me.id && !e.auto) showMsg('鎖定'); break;
     case 'unlock': if (e.id === me.id) showMsg(e.lost ? '失去目標' : '解除鎖定'); break;
@@ -263,19 +322,43 @@ const loop = createLoop({
     for (const e of drain(world)) handleEvent(e);
   },
   render(alpha, frameDt) {
+    // Hit stop: on a solid melee hit the picture holds for a few frames while the simulation goes on.
+    const frozen = hitstopT > 0;
+    if (frozen) hitstopT -= frameDt;
+    const animDt = frozen ? 0 : frameDt;
     world.fighters.forEach((f, i) => {
-      const p = prev[i], m = mechs[i];
-      m.group.position.set(p.x + (f.pos.x - p.x) * alpha, p.y + (f.pos.y - p.y) * alpha, p.z + (f.pos.z - p.z) * alpha);
-      m.group.rotation.y = lerpAngle(p.yaw, f.yaw, alpha);
+      const p = prev[i], m = mechs[i], fx = mechFx[i];
+      if (!frozen) {
+        m.group.position.set(p.x + (f.pos.x - p.x) * alpha, p.y + (f.pos.y - p.y) * alpha, p.z + (f.pos.z - p.z) * alpha);
+        m.group.rotation.y = lerpAngle(p.yaw, f.yaw, alpha);
+        fx.hitT += frameDt; fx.firedT += frameDt;
+      }
       shadows[i].update(m.group.position, world.statics);
+      const mw = meleeOf(f);
+      let melee = null;
+      if (f.melee) {
+        const sw = mw.combo[f.melee.combo] || mw.combo[0];
+        const dur = f.melee.stage === 'lunge' ? mw.lungeDist / mw.lungeSpeed : sw[f.melee.stage] || 0.1;
+        melee = { stage: f.melee.stage, progress: f.melee.t / dur, style: sw.style || 'slashR' };
+      }
       animateMech(m, {
         speed: Math.hypot(f.vel.x, f.vel.z), runSpeed: CFG.MOVE.run, onGround: f.onGround, boosting: f.boosting,
         dashing: f.dashTimer > 0, vy: f.vel.y, landLag: f.landLag, aiming: f.aiming, aimPitch: f.aim.pitch,
-        active: f.active, melee: f.melee, guard: f.guard, stun: f.stun, dead: f.dead,
-      }, frameDt);
+        active: f.active, melee, guard: f.guard, stun: f.stun, dead: f.dead,
+        bladeScale: mw.bladeScale, gunScale: GUN_SCALE[rangedOf(f).look] || null,
+        hitT: fx.hitT, hitSide: fx.hitSide, hitHeavy: fx.hitHeavy, firedT: fx.firedT, firedKind: fx.firedKind,
+      }, animDt);
+      // The blade leaves a ribbon while it sweeps.
+      const sweeping = f.melee && (f.melee.stage === 'active' || (f.melee.stage === 'recovery' && f.melee.t < 0.05));
+      if (sweeping && !frozen) {
+        m.group.updateMatrixWorld(true);
+        const base = m.nodes.get('bladeBaseR'), tip = m.nodes.get('bladeTipR');
+        if (base && tip) trails[i].push(base.getWorldPosition(new THREE.Vector3()), tip.getWorldPosition(new THREE.Vector3()));
+      }
+      trails[i].update(animDt);
     });
-    tracers.update(frameDt); sparks.update(frameDt); slashes.update(frameDt);
-    bolts.sync(world.projectiles, alpha);
+    sparks.update(animDt); smoke.update(animDt); debris.update(animDt); flashes.update(animDt); slashes.update(animDt);
+    bolts.sync(world.projectiles, frozen ? 0 : alpha, animDt);
 
     // Camera: first person while aiming, the lock-on orbit while locked, free orbit otherwise.
     const myPos = mechs[0].group.position, enemyPos = mechs[1].group.position;
@@ -285,6 +368,7 @@ const loop = createLoop({
     cam.use(rig);
     mechs[0].group.visible = !(me.aiming && !cam.blending);
     cam.update(frameDt, myPos, look, world.statics, enemyPos);
+    shake.apply(app.camera, frameDt);
     sky.update(app.camera);
     app.render();
 
