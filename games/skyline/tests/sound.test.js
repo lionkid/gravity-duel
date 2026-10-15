@@ -11,7 +11,7 @@ test('every simulation event plays a defined recipe', () => {
   const events = [
     ...['vulcan', 'rocket', 'longrifle', 'handcannon'].map((kind) => ({ t: 'shot', id: 1, kind, ...at })),
     ...['rocketS', 'rocketM', 'bolt', 'shell'].map((look) => ({ t: 'impact', look, ...at })),
-    { t: 'slash', id: 1, ...at }, { t: 'melee', id: 2, lunge: true },
+    { t: 'slash', id: 1, style: 'slashR', ...at }, { t: 'slash', id: 1, style: 'overhead', ...at }, { t: 'slash', id: 1, style: 'spin', ...at }, { t: 'melee', id: 2, lunge: true }, { t: 'dry', id: 1, reason: 'cooldown' },
     { t: 'hit', id: 2, amount: 50, ...at }, { t: 'hit', id: 2, amount: 200, ...at }, { t: 'hit', id: 2, amount: 10, guard: true, ...at }, { t: 'hit', id: 2, amount: 10, broke: true, ...at },
     { t: 'jump', id: 1 }, { t: 'land', id: 1, hard: false, ...at }, { t: 'land', id: 1, hard: true, ...at }, { t: 'dash', id: 1, ...at },
     { t: 'switch', id: 1 }, { t: 'lock', id: 1 }, { t: 'unlock', id: 1 }, { t: 'overheat', id: 1 }, { t: 'fence', id: 1 }, { t: 'ko', id: 2 },

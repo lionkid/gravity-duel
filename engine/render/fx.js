@@ -132,37 +132,91 @@ export function createFlashes(scene, { max = 32 } = {}) {
 }
 
 // Glowing arcs for melee swings, in front of the attacker, fading over their short life.
-export function createSlashes(scene, { max = 6, life = 0.22 } = {}) {
+// Slash arcs: a wide coloured crescent with a thin white core, sweeping on as they fade. The spin
+// style draws a full ring around the mech instead.
+export function createSlashes(scene, { max = 6, life = 0.3 } = {}) {
   const items = [];
+  const arcGeo = new THREE.RingGeometry(7, 25, 28, 1, -0.7, 3.0);
+  const coreGeo = new THREE.RingGeometry(18, 22, 28, 1, -0.5, 2.6);
+  const ringGeo = new THREE.RingGeometry(12, 27, 48);
+  const coreRingGeo = new THREE.RingGeometry(19, 22, 48);
   for (let i = 0; i < max; i++) {
-    const geo = new THREE.RingGeometry(6, 19, 18, 1, -0.5, 2.6);
-    const mat = new THREE.MeshBasicMaterial({ color: 0x58e0ff, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.visible = false;
-    mesh.name = 'slash';
-    scene.add(mesh);
-    items.push({ mesh, ttl: 0 });
+    const group = new THREE.Group();
+    const outer = new THREE.Mesh(arcGeo, new THREE.MeshBasicMaterial({ color: 0x58e0ff, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }));
+    const core = new THREE.Mesh(coreGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }));
+    group.add(outer, core);
+    group.visible = false;
+    group.name = 'slash';
+    scene.add(group);
+    items.push({ group, outer, core, ttl: 0, sweep: 0 });
   }
   let next = 0;
   return {
-    // style: 'slashR' sweeps right to left, 'slashL' the other way, 'overhead' comes straight down.
+    // style: 'slashR' sweeps right to left, 'slashL' the other way, 'overhead' comes straight down,
+    // 'spin' is a level ring all the way round.
     spawn(x, y, z, yaw, color, style = 'slashR') {
       const it = items[next]; next = (next + 1) % max;
       it.ttl = life;
+      it.group.visible = true;
+      it.outer.material.color.setHex(color == null ? 0x58e0ff : color);
+      it.group.position.set(x, y + 11, z);
+      const ring = style === 'spin';
+      it.outer.geometry = ring ? ringGeo : arcGeo;
+      it.core.geometry = ring ? coreRingGeo : coreGeo;
+      if (ring) { it.group.rotation.set(-Math.PI / 2, 0, 0, 'YXZ'); it.sweep = 0; it.group.position.y = y + 9; }
+      else if (style === 'overhead') { it.group.rotation.set(0, yaw + Math.PI / 2, 0, 'YXZ'); it.sweep = -4; }
+      else { it.group.rotation.set(-Math.PI / 2 + (style === 'slashL' ? 0.55 : -0.55), yaw, style === 'slashL' ? Math.PI : 0, 'YXZ'); it.sweep = style === 'slashL' ? -5 : 5; }
+      it.group.scale.setScalar(ring ? 0.6 : 0.75);
+    },
+    update(dt) {
+      for (const it of items) {
+        if (it.ttl <= 0) { if (it.group.visible) it.group.visible = false; continue; }
+        it.ttl -= dt;
+        const k = Math.max(0, it.ttl / life);
+        it.outer.material.opacity = k * 0.85;
+        it.core.material.opacity = k * k * 0.9;
+        const grow = 1 - k;
+        it.group.scale.setScalar((it.sweep ? 0.75 : 0.6) + grow * 0.9);
+        if (it.sweep) it.group.rotateZ(it.sweep * dt);
+      }
+    },
+    clear() { for (const it of items) { it.ttl = 0; it.group.visible = false; } },
+  };
+}
+
+// Shock rings: a thin ring that expands and fades, flat on the ground or facing a direction. Heavy
+// hits, slams, big impacts and muzzle blasts use them.
+export function createRings(scene, { max = 12 } = {}) {
+  const geo = new THREE.RingGeometry(0.78, 1, 48);
+  const items = [];
+  for (let i = 0; i < max; i++) {
+    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }));
+    mesh.visible = false;
+    mesh.name = 'ring';
+    scene.add(mesh);
+    items.push({ mesh, ttl: 0, life: 0.4, radius: 10 });
+  }
+  let next = 0;
+  const up = new THREE.Vector3(0, 0, 1), nrm = new THREE.Vector3();
+  return {
+    // normal: the ring's axis ({x, y, z}); omitted means flat on the ground.
+    spawn(x, y, z, color, radius = 12, lifeSec = 0.4, normal = null) {
+      const it = items[next]; next = (next + 1) % max;
+      it.ttl = it.life = lifeSec; it.radius = radius;
       it.mesh.visible = true;
-      it.mesh.material.color.setHex(color == null ? 0x58e0ff : color);
-      it.mesh.position.set(x, y + 11, z);
-      if (style === 'overhead') it.mesh.rotation.set(0, yaw + Math.PI / 2, 0, 'YXZ');
-      else it.mesh.rotation.set(-Math.PI / 2 + (style === 'slashL' ? 0.55 : -0.55), yaw, style === 'slashL' ? Math.PI : 0, 'YXZ');
-      it.mesh.scale.setScalar(0.7);
+      it.mesh.material.color.setHex(color == null ? 0xffffff : color);
+      it.mesh.position.set(x, y, z);
+      nrm.set(normal ? normal.x : 0, normal ? normal.y : 1, normal ? normal.z : 0).normalize();
+      it.mesh.quaternion.setFromUnitVectors(up, nrm);
+      it.mesh.scale.setScalar(radius * 0.1);
     },
     update(dt) {
       for (const it of items) {
         if (it.ttl <= 0) { if (it.mesh.visible) it.mesh.visible = false; continue; }
         it.ttl -= dt;
-        const k = Math.max(0, it.ttl / life);
+        const k = Math.max(0, it.ttl / it.life), grow = 1 - (k * k);
         it.mesh.material.opacity = k * 0.9;
-        it.mesh.scale.setScalar(0.7 + (1 - k) * 0.7);
+        it.mesh.scale.setScalar(Math.max(0.01, it.radius * (0.1 + 0.9 * grow)));
       }
     },
     clear() { for (const it of items) { it.ttl = 0; it.mesh.visible = false; } },
@@ -171,7 +225,7 @@ export function createSlashes(scene, { max = 6, life = 0.22 } = {}) {
 
 // A ribbon left behind a blade: push the blade's base and tip each frame while it swings and the
 // ribbon fades out behind it. One per mech.
-export function createBladeTrail(scene, { color = 0x58e0ff, segments = 20, life = 0.16 } = {}) {
+export function createBladeTrail(scene, { color = 0x58e0ff, segments = 36, life = 0.3 } = {}) {
   const n = segments;
   const pos = new Float32Array(n * 2 * 3), col = new Float32Array(n * 2 * 3), age = new Float32Array(n).fill(Infinity);
   const index = [];
@@ -203,7 +257,8 @@ export function createBladeTrail(scene, { color = 0x58e0ff, segments = 20, life 
         age[i] += dt;
         const k = Math.max(0, 1 - age[i] / life);
         if (k > 0) alive = true;
-        for (let v = 0; v < 2; v++) { col[i * 6 + v * 3] = base[0] * k * 1.6; col[i * 6 + v * 3 + 1] = base[1] * k * 1.6; col[i * 6 + v * 3 + 2] = base[2] * k * 1.6; }
+        const b = k * k * 2.4;                       // bright while fresh, gone quickly
+        for (let v = 0; v < 2; v++) { col[i * 6 + v * 3] = base[0] * b; col[i * 6 + v * 3 + 1] = base[1] * b; col[i * 6 + v * 3 + 2] = base[2] * b; }
       }
       if (!alive) { mesh.visible = false; age.fill(Infinity); return; }
       geo.attributes.position.needsUpdate = true;

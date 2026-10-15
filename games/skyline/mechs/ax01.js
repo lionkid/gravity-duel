@@ -71,8 +71,8 @@ export const AX01 = {
         { name: 'blade', shape: 'group', pos: [0, -9.3, -0.3], only: 'R', children: [               // energy sword
           { shape: 'cyl', size: [0.5, 0.55, 2.6, 8], pos: [0, 0, 1.2], rot: [Math.PI / 2, 0, 0], mat: 'trim' },        // hilt
           { shape: 'box', size: [2.8, 2.2, 0.5], pos: [0, 0.1, -0.2], mat: 'armor2' },                                  // guard
-          { shape: 'box', size: [0.55, 2.0, 13.5], pos: [0, 0.1, -7.6], mat: 'glow' },                                  // blade
-          { shape: 'box', size: [0.06, 3.6, 14.2], pos: [0, 0.1, -7.6], mat: 'aura' },                                  // glow sheet
+          { name: 'edge', shape: 'box', size: [0.55, 2.0, 13.5], pos: [0, 0.1, -7.6], mat: 'blade' },                  // blade
+          { name: 'aura', shape: 'box', size: [0.06, 3.6, 14.2], pos: [0, 0.1, -7.6], mat: 'aura' },                   // glow sheet
           { name: 'bladeBase', shape: 'group', pos: [0, 0.1, -0.9] },
           { name: 'bladeTip', shape: 'group', pos: [0, 0.1, -14.4] },
         ] },

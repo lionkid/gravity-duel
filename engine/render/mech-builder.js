@@ -36,6 +36,8 @@ export function makeMaterials(palette, { glowIntensity = 2.2 } = {}) {
     armor2: new THREE.MeshStandardMaterial({ color: p.armor2, metalness: 0.5, roughness: 0.5 }),
     trim: new THREE.MeshStandardMaterial({ color: p.trim, metalness: 0.9, roughness: 0.25 }),
     glow: new THREE.MeshStandardMaterial({ color: p.glow, emissive: p.glow, emissiveIntensity: glowIntensity, metalness: 0.1, roughness: 0.3 }),
+    // The sword's own light, so it can flare for a swing without the whole frame lighting up.
+    blade: new THREE.MeshStandardMaterial({ color: p.glow, emissive: p.glow, emissiveIntensity: glowIntensity, metalness: 0.1, roughness: 0.3 }),
     flame: new THREE.MeshBasicMaterial({ color: p.glow, transparent: true, opacity: 0.85, depthWrite: false, blending: THREE.AdditiveBlending }),
     aura: new THREE.MeshBasicMaterial({ color: p.glow, transparent: true, opacity: 0.3, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }),
     dark: new THREE.MeshStandardMaterial({ color: p.dark, metalness: 0.4, roughness: 0.7 }),

@@ -19,7 +19,7 @@ import { buildMech } from '../../engine/render/mech-builder.js';
 import { animateMech } from '../../engine/render/mech-anim.js';
 import { createBar, el, project } from '../../engine/render/hud.js';
 import { createSky } from '../../engine/render/sky.js';
-import { createBlobShadow, createSparks, createSlashes, createProjectileView, createFlashes, createBladeTrail } from '../../engine/render/fx.js';
+import { createBlobShadow, createSparks, createSlashes, createProjectileView, createFlashes, createBladeTrail, createRings, createTracers } from '../../engine/render/fx.js';
 import { createPost } from '../../engine/render/post.js';
 import { createSynth } from '../../engine/audio/synth.js';
 import { createScreens } from '../../engine/ui/screens.js';
@@ -82,17 +82,27 @@ const smoke = createSparks(app.scene, { max: 1024, size: 3.4 });
 const debris = createSparks(app.scene, { max: 256, size: 2.2 });
 const flashes = createFlashes(app.scene);
 const slashes = createSlashes(app.scene);
+const rings = createRings(app.scene);
+const tracers = createTracers(app.scene, { life: 0.1 });
 const bolts = createProjectileView(app.scene, { smoke, sparks });
 const trails = mechs.map((m) => createBladeTrail(app.scene, { color: m.design.palette.glow }));
 const shake = createShake();
-// Warm up every material once so the first shot, flash or trail does not stall on shader compilation.
+// Warm up every material once so the first shot, flash, ring or trail does not stall on shader
+// compilation: the effect pools start hidden, and compile() only sees visible objects.
 bolts.warm();
-app.renderer.compile(app.scene, app.camera);
+function warmMaterials() {
+  const hidden = [];
+  app.scene.traverse((o) => { if (!o.visible) { o.visible = true; hidden.push(o); } });
+  app.renderer.compile(app.scene, app.camera);
+  for (const o of hidden) o.visible = false;
+}
+warmMaterials();
 // Per-mech presentation state the animator reads: time since the last hit / shot.
 const mechFx = mechs.map(() => ({ hitT: Infinity, hitSide: 0, hitHeavy: false, firedT: Infinity, firedKind: '' }));
 let hitstopT = 0;
 const GUN_SCALE = { rocketM: [1.2, 1.2, 1.15], bolt: [0.75, 0.75, 1.6], shell: [1.1, 1.1, 0.7] };
-const FLASH = { vulcan: 1.6, rocket: 3.5, longrifle: 3, handcannon: 2.2 };
+const FLASH = { vulcan: 1.6, rocket: 4.5, longrifle: 4, handcannon: 3 };
+const TRACER = { vulcan: 7, rocket: 16, longrifle: 320, handcannon: 12 };   // streak length from the muzzle
 const BOOM = { rocketS: 5, rocketM: 12, bolt: 6, shell: 7 };
 
 // Sound: synthesized, positioned around the camera. Browsers only start audio after a gesture.
@@ -139,6 +149,8 @@ const reticle = el('div', 'reticle', hud);
 el('span', '', reticle, 'LOCK');
 const lost = el('div', 'lost', hud);
 const crosshair = el('div', 'crosshair', hud);
+el('div', 'cdring', crosshair);
+const sflash = el('div', 'sflash', hud);
 const hitmark = el('div', 'hitmark', hud);
 const vignette = el('div', 'vignette', hud);
 const msg = el('div', 'msg', hud);
@@ -158,7 +170,7 @@ function showDamage(x, y, amount, heavy, mine) {
   d.classList.add('on');
 }
 let showDebug = params.has('debug');
-let hitmarkT = 0, vignetteT = 0, msgT = 0;
+let hitmarkT = 0, vignetteT = 0, msgT = 0, sflashT = 0, denyT = 0;
 const showMsg = (text, t = 1.2) => { msg.textContent = text; msg.classList.add('on'); msgT = t; };
 
 // ---------------------------------------------------------------- battle state
@@ -179,7 +191,7 @@ function setStage(id, { fromPeer = false } = {}) {
   stage = generateCity(Object.assign({ seed }, CFG.STAGES[stageId]));
   stageVis = buildStageVisual(app.scene, stage, { environments, timeOfDay: CFG.STAGES[stageId].dusk.start });
   sky.set({ earth: stageVis.theme.earth || null });
-  app.renderer.compile(app.scene, app.camera);
+  warmMaterials();
   if (!inBattle) setupWorld();
   if (!fromPeer) lobby.setStage(id);
 }
@@ -201,7 +213,7 @@ function setupWorld({ matchSeed = seed, loadouts = { 1: loadout, 2: cpuLoadout }
     m.flash = 0;
     m.materials.glow.emissiveIntensity = 2.2;
   });
-  for (const fx of [sparks, smoke, debris, flashes, slashes, bolts, ...trails]) fx.clear();
+  for (const fx of [sparks, smoke, debris, flashes, slashes, rings, tracers, bolts, ...trails]) fx.clear();
   for (const fx of mechFx) { fx.hitT = Infinity; fx.firedT = Infinity; }
   hitstopT = 0; koT = 0;
   lastSeen = null;
@@ -385,12 +397,20 @@ function shakeAt(x, y, z, amount) {
 function handleEvent(e) {
   switch (e.t) {
     case 'shot': {
-      flashes.spawn(e.x, e.y, e.z, e.color, FLASH[e.kind] || 4, 0.09);
-      sparks.burst(e.x, e.y, e.z, e.color, e.kind === 'vulcan' ? 4 : 10, 16, 0.2, 0, 0, { x: e.dx, y: e.dy, z: e.dz }, 1.5);
-      if (e.kind !== 'vulcan') smoke.burst(e.x, e.y, e.z, 0x9aa0ad, 6, 6, 0.6, -3, 2);
+      // Muzzle: a coloured bloom with a white core, a streak along the shot, a blast ring, sparks and smoke.
+      const size = FLASH[e.kind] || 4;
+      flashes.spawn(e.x, e.y, e.z, e.color, size, 0.09);
+      flashes.spawn(e.x, e.y, e.z, 0xffffff, size * 0.45, 0.05);
+      const len = TRACER[e.kind] || 10;
+      tracers.spawn(e.x, e.y, e.z, e.x + e.dx * len, e.y + e.dy * len, e.z + e.dz * len, e.kind === 'longrifle' ? 0xe0fff8 : e.color);
+      if (e.kind !== 'vulcan') {
+        rings.spawn(e.x + e.dx * 2, e.y + e.dy * 2, e.z + e.dz * 2, e.color, e.kind === 'longrifle' ? 9 : 6, 0.16, { x: e.dx, y: e.dy, z: e.dz });
+        smoke.burst(e.x, e.y, e.z, 0x9aa0ad, 8, 7, 0.7, -3, 2);
+      }
+      sparks.burst(e.x, e.y, e.z, e.color, e.kind === 'vulcan' ? 4 : 14, 18, 0.22, 0, 0, { x: e.dx, y: e.dy, z: e.dz }, 1.6);
       const fx = mechFx[e.id - 1];
       if (fx) { fx.firedT = 0; fx.firedKind = e.kind; }
-      if (e.id === me.id) shake.kick(e.kind === 'vulcan' ? 0.12 : 0.45);
+      if (e.id === me.id) shake.kick(e.kind === 'vulcan' ? 0.12 : e.kind === 'longrifle' ? 0.7 : 0.5);
       break;
     }
     case 'impact': {
@@ -400,10 +420,20 @@ function handleEvent(e) {
       sparks.burst(e.x, e.y, e.z, e.color, Math.round(size * 2.5), 12 + size * 2.5, 0.45, 50);
       smoke.burst(e.x, e.y, e.z, 0x8a8f9a, Math.round(size), 4 + size * 0.6, 0.9, -3, 2);
       if (!e.body) debris.burst(e.x, e.y, e.z, 0x6a7384, Math.round(size * 0.8), 14 + size, 0.8, 60);
+      if (size >= 10) { const l = Math.hypot(e.dx, e.dy, e.dz) || 1; rings.spawn(e.x, e.y, e.z, e.color, size * 1.4, 0.35, { x: -e.dx / l, y: -e.dy / l, z: -e.dz / l }); }
       shakeAt(e.x, e.y, e.z, size * 0.05);
       break;
     }
-    case 'slash': slashes.spawn(e.x, e.y, e.z, e.yaw, e.color, e.style); break;
+    case 'slash': {
+      slashes.spawn(e.x, e.y, e.z, e.yaw, e.color, e.style);
+      const fwd = { x: -Math.sin(e.yaw), z: -Math.cos(e.yaw) };
+      // The heavy swings shake the ground: a shock ring where the blade comes down, or all around a spin.
+      if (e.style === 'overhead') rings.spawn(e.x + fwd.x * 9, e.y + 0.4, e.z + fwd.z * 9, e.color, 18, 0.4);
+      else if (e.style === 'spin') rings.spawn(e.x, e.y + 8, e.z, e.color, 30, 0.35);
+      sparks.burst(e.x + fwd.x * 6, e.y + 11, e.z + fwd.z * 6, e.color, 10, 24, 0.25, 0, 0, fwd, 1.2);
+      if (e.id === me.id) shake.kick(e.style === 'overhead' || e.style === 'spin' ? 0.35 : 0.15);
+      break;
+    }
     case 'hit': {
       const victim = world.fighters[e.id - 1];
       const m = mechs[e.id - 1], fx = mechFx[e.id - 1];
@@ -414,8 +444,10 @@ function handleEvent(e) {
       flashes.spawn(e.x, e.y, e.z, col, heavy ? 6 : 3.5, 0.1);
       sparks.burst(e.x, e.y, e.z, col, e.guard ? 14 : heavy ? 60 : 30, heavy ? 55 : 38, 0.5, 45);
       if (!e.guard) debris.burst(e.x, e.y, e.z, 0x9aa3b5, heavy ? 16 : 6, 20, 0.9, 70);
-      if (e.melee) hitstopT = Math.max(hitstopT, heavy ? 0.09 : 0.05);
-      if (e.by === me.id) { hitmarkT = 0.12; shake.kick(e.melee ? 0.35 : 0.15); }
+      if (heavy || e.melee) rings.spawn(e.x, e.y, e.z, e.guard ? 0x8fb3ff : 0xfff0d0, heavy ? 22 : 10, heavy ? 0.4 : 0.25, victim ? { x: Math.sin(e.fromYaw), y: 0.2, z: Math.cos(e.fromYaw) } : null);
+      if (e.melee) hitstopT = Math.max(hitstopT, e.final ? 0.13 : heavy ? 0.1 : 0.05);
+      if (heavy && (e.by === me.id || e.id === me.id)) sflashT = 0.14;
+      if (e.by === me.id) { hitmarkT = 0.12; shake.kick(e.melee ? (heavy ? 0.6 : 0.35) : 0.15); }
       if (e.id === me.id) { vignetteT = 0.4; shake.kick(heavy ? 1.2 : e.melee ? 0.7 : 0.3); }
       const p = project(app.camera, e.x, e.y, e.z, app.size.w, app.size.h);
       if (p.visible) showDamage(p.x, p.y, e.amount, heavy, e.id === me.id);
@@ -428,7 +460,10 @@ function handleEvent(e) {
       sparks.burst(f.pos.x, f.pos.y + 10, f.pos.z, 0xffe0a0, 220, 60, 1.4, 25);
       smoke.burst(f.pos.x, f.pos.y + 10, f.pos.z, 0x9aa0ad, 60, 18, 2.0, -2, 1.2);
       debris.burst(f.pos.x, f.pos.y + 10, f.pos.z, 0x8a93a6, 40, 40, 1.6, 60);
+      rings.spawn(f.pos.x, f.pos.y + 1, f.pos.z, 0xffe0a0, 45, 0.6);
+      rings.spawn(f.pos.x, f.pos.y + 10, f.pos.z, 0xffffff, 30, 0.4, { x: 0, y: 0.3, z: 1 });
       shake.kick(1.5);
+      sflashT = 0.2;
       hitstopT = 0.12;
       koResult.textContent = e.by === me.id ? 'WIN' : 'LOSE';
       ko.classList.toggle('lose', e.by !== me.id);
@@ -438,7 +473,13 @@ function handleEvent(e) {
     }
     case 'land': if (e.hard) { smoke.burst(e.x, e.y + 0.5, e.z, 0x8a8f9a, 24, 16, 0.7, 10, 2); shakeAt(e.x, e.y, e.z, 0.3); } break;
     case 'dash': sparks.burst(e.x, e.y + 8, e.z, 0x58e0ff, 12, 15, 0.3, 0); break;
-    case 'melee': if (e.lunge) { const f = world.fighters[e.id - 1]; sparks.burst(f.pos.x, f.pos.y + 10, f.pos.z, 0x58e0ff, 16, 18, 0.3, 0); } break;
+    case 'melee': if (e.lunge) {
+      const f = world.fighters[e.id - 1], glow = mechs[e.id - 1] ? mechs[e.id - 1].design.palette.glow : 0x58e0ff;
+      sparks.burst(f.pos.x, f.pos.y + 10, f.pos.z, glow, 24, 22, 0.3, 0);
+      flashes.spawn(f.pos.x, f.pos.y + 10, f.pos.z, glow, 7, 0.08);
+      rings.spawn(f.pos.x, f.pos.y + 0.5, f.pos.z, glow, 12, 0.3);
+    } break;
+    case 'dry': if (e.id === me.id) denyT = 0.14; break;
     case 'overheat': if (e.id === me.id) showMsg('火神砲過熱'); break;
     case 'lock': if (e.id === me.id && !e.auto) showMsg('鎖定'); break;
     case 'unlock': if (e.id === me.id) showMsg(e.lost ? '失去目標' : '解除鎖定'); break;
@@ -449,9 +490,8 @@ function handleEvent(e) {
 // ---------------------------------------------------------------- loop
 let frames = 0, fpsTime = 0, fps = 0;
 
-const loop = createLoop({
-  maxSteps: 10,                 // the simulation is cheap; let slow renderers keep real time
-  step(dt) {
+let devFreeze = false;          // tooling: hold the simulation while the renderer keeps drawing
+function simStep(dt) {
     // Input is sampled every tick so key edges are consumed; the view only follows it in play.
     const yaw = look.yaw, pitch = look.pitch;
     const intent = mapper.sample(dt);
@@ -471,7 +511,11 @@ const loop = createLoop({
       stepWorld(world, [mine, dummyMode ? dummyStep(dt) : aiIntent(ai, world, 2, dt)], dt);
     }
     for (const e of drain(world)) { handleEvent(e); soundForEvent(sfx, e, world, me.id); }
-  },
+}
+
+const loop = createLoop({
+  maxSteps: 10,                 // the simulation is cheap; let slow renderers keep real time
+  step(dt) { if (!devFreeze) simStep(dt); },
   render(alpha, frameDt) {
     // LAN: the host sends this frame's ticks; the guest plays the confirmed events and rebuilds its view.
     if (session.kind === 'host') session.sync.flush();
@@ -504,8 +548,14 @@ const loop = createLoop({
       let melee = null;
       if (f.melee) {
         const sw = mw.combo[f.melee.combo] || mw.combo[0];
-        const dur = f.melee.stage === 'lunge' ? mw.lungeDist / mw.lungeSpeed : sw[f.melee.stage] || 0.1;
+        // The blade is cocked over the wind-up time, also while lunging.
+        const dur = f.melee.stage === 'lunge' ? sw.windup : sw[f.melee.stage] || 0.1;
         melee = { stage: f.melee.stage, progress: f.melee.t / dur, style: sw.style || 'slashR' };
+        if (f.melee.stage === 'lunge' && !frozen) {
+          // Afterimage: a stream of glow behind the charging mech.
+          const vl = Math.hypot(f.vel.x, f.vel.z) || 1;
+          sparks.burst(m.group.position.x, m.group.position.y + 9, m.group.position.z, m.design.palette.glow, 3, 14, 0.22, 0, 0, { x: -f.vel.x / vl, y: 0.15, z: -f.vel.z / vl }, 2.5);
+        }
       }
       animateMech(m, {
         speed: Math.hypot(f.vel.x, f.vel.z), runSpeed: CFG.MOVE.run, onGround: f.onGround, boosting: f.boosting,
@@ -514,6 +564,8 @@ const loop = createLoop({
         bladeScale: mw.bladeScale, gunScale: GUN_SCALE[rangedOf(f).look] || null,
         hitT: fx.hitT, hitSide: fx.hitSide, hitHeavy: fx.hitHeavy, firedT: fx.firedT, firedKind: fx.firedKind,
       }, animDt);
+      // The swing's hop and spin sit on top of the simulated transform.
+      if (!frozen) { m.group.rotation.y += m.rootYaw || 0; m.group.position.y += m.rootLift || 0; }
       // The blade leaves a ribbon while it sweeps.
       const sweeping = f.melee && (f.melee.stage === 'active' || (f.melee.stage === 'recovery' && f.melee.t < 0.05));
       if (sweeping && !frozen) {
@@ -523,7 +575,7 @@ const loop = createLoop({
       }
       trails[i].update(animDt);
     });
-    sparks.update(animDt); smoke.update(animDt); debris.update(animDt); flashes.update(animDt); slashes.update(animDt);
+    sparks.update(animDt); smoke.update(animDt); debris.update(animDt); flashes.update(animDt); slashes.update(animDt); rings.update(animDt); tracers.update(animDt);
     bolts.sync(world.projectiles, frozen ? 0 : alpha, animDt);
 
     // Camera: a slow orbit over the city behind the menus; in play, first person while aiming, the
@@ -575,6 +627,10 @@ const loop = createLoop({
     weaponsBox.classList.toggle('cooling', me.switchCd > 0);
     crosshair.classList.toggle('on', me.aiming);
     crosshair.classList.toggle('ready', me.aiming && me.active === 'ranged' && me.fireCd <= 0 && me.energy >= rangedW.energy);
+    crosshair.classList.toggle('cooling', me.aiming && me.fireCd > 0);
+    crosshair.style.setProperty('--cd', (me.fireCd / rangedW.interval).toFixed(3));
+    if (denyT > 0) { denyT -= frameDt; crosshair.classList.add('deny'); reticle.classList.add('deny'); } else { crosshair.classList.remove('deny'); reticle.classList.remove('deny'); }
+    if (sflashT > 0) { sflashT -= frameDt; sflash.style.opacity = Math.min(0.45, sflashT * 3.5).toFixed(2); } else if (sflash.style.opacity !== '0') sflash.style.opacity = '0';
 
     // The opponent's health floats over its head, but only while it can be seen; otherwise an arrow
     // points at where it was last seen, so hiding between buildings works.
@@ -631,7 +687,7 @@ loop.start();
 
 // Hooks for tests and tooling.
 window.__skyline = {
-  get world() { return world; }, look, mouse, gamepad, touch: touchUi, app, post, sfx, ui, settings, loadout, cpuLoadout, socket, lobby,
+  get world() { return world; }, look, mouse, gamepad, touch: touchUi, app, post, sfx, ui, settings, loadout, cpuLoadout, socket, lobby, mechs, cam,
   get stage() { return stage; }, get stageId() { return stageId; }, setStage,
   get playing() { return playing; }, get inBattle() { return inBattle; }, get mySeat() { return mySeat; },
   get net() {
@@ -640,4 +696,7 @@ window.__skyline = {
     return { kind: session.kind, tick: world.tick, confirmedTick: s.world.tick, confirmedHash: hashWorld(s.world), stats: { ...s.stats }, hostHashes: Object.fromEntries(hostHashes) };
   },
   setPlaying, startBattle, pause, resume, quit, loop, version: CFG.GAME.version,
+  // Tooling: freeze the simulation and advance it by hand (screenshots of a pose).
+  freeze(on) { devFreeze = !!on; },
+  tick(n = 1) { for (let i = 0; i < n; i++) simStep(1 / 60); },
 };

@@ -101,14 +101,30 @@ await page.close();
   await p3.waitForFunction(() => window.__skyline, null, { timeout: 30000 });
   await p3.evaluate(() => window.__skyline.startBattle());
   await p3.waitForFunction(() => window.__skyline.world.tick > 3, null, { timeout: 30000 });
-  await p3.evaluate(() => { window.__skyline.world.fighters[1].hp = 1; });
   await p3.keyboard.press('Digit1');
   await p3.waitForFunction(() => window.__skyline.world.fighters[0].switchTimer === 0 && window.__skyline.world.fighters[0].active === 'melee', null, { timeout: 10000 });
+  // Three presses chain the saber combo: a shot of the first cut, then of the spinning finisher.
+  const stage = () => p3.evaluate(() => { const m = window.__skyline.world.fighters[0].melee; return m ? `${m.combo}:${m.stage}` : 'none'; });
+  const t0m = Date.now();
   await p3.keyboard.press('KeyJ');
-  await p3.waitForFunction(() => { const m = window.__skyline.world.fighters[0].melee; return m && (m.stage === 'active' || m.stage === 'recovery'); }, null, { timeout: 10000 }).catch(() => {});
+  await p3.waitForFunction(() => { const m = window.__skyline.world.fighters[0].melee; return m && m.stage === 'active'; }, null, { timeout: 10000 }).catch(() => {});
+  console.log(`  first cut active after ${Date.now() - t0m} ms wall (${await p3.evaluate(() => window.__skyline.world.fighters[0].melee && window.__skyline.world.fighters[0].melee.t.toFixed(3))} s into the stage)`);
   await p3.screenshot({ path: path.join(outDir, '10-melee.png') });
-  console.log('  saved 10-melee.png');
-  console.log(`  opponent hp after melee: ${await p3.evaluate(() => window.__skyline.world.fighters[1].hp)}`);
+  console.log('  saved 10-melee.png', await stage());
+  for (let i = 0; i < 2; i++) {
+    await p3.waitForFunction(() => { const m = window.__skyline.world.fighters[0].melee; return !m || m.stage === 'recovery'; }, null, { timeout: 10000 }).catch(() => {});
+    await p3.keyboard.press('KeyJ');
+    await p3.waitForFunction((c) => { const m = window.__skyline.world.fighters[0].melee; return m && m.combo === c && m.stage !== 'windup'; }, i + 1, { timeout: 10000 }).catch(() => {});
+  }
+  await p3.waitForFunction(() => { const m = window.__skyline.world.fighters[0].melee; return m && m.combo === 2 && m.stage === 'active' && m.t > 0.06; }, null, { timeout: 10000 }).catch(() => {});
+  await p3.screenshot({ path: path.join(outDir, '10b-spin.png') });
+  console.log('  saved 10b-spin.png', await stage());
+  console.log(`  opponent hp after the combo: ${await p3.evaluate(() => window.__skyline.world.fighters[1].hp)}`);
+  // Then a finishing blow for the KO screen.
+  await p3.waitForFunction(() => !window.__skyline.world.fighters[0].melee, null, { timeout: 10000 }).catch(() => {});
+  await p3.evaluate(() => { window.__skyline.world.fighters[1].hp = 1; });
+  await p3.keyboard.press('KeyJ');
+  console.log(`  opponent hp after melee: ${await p3.evaluate(async () => { await new Promise((r) => setTimeout(r, 1200)); return window.__skyline.world.fighters[1].hp; })}`);
   await p3.waitForFunction(() => window.__skyline.ui.name === 'ko', null, { timeout: 10000 }).catch(() => {});
   await p3.screenshot({ path: path.join(outDir, '12-ko.png') });
   console.log(`  saved 12-ko.png (screen ${await p3.evaluate(() => window.__skyline.ui.name)})`);

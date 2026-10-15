@@ -73,7 +73,7 @@ export function createHostSync({ world, stepWorld, serializeWorld, send, dt = 1 
   };
 }
 
-export function createGuestSync({ world, stepWorld, cloneWorld, applySnapshot, send, dt = 1 / 60, localSeat = 2, remoteSeat = 1, delay = 2, now = () => Date.now() }) {
+export function createGuestSync({ world, stepWorld, cloneWorld, applySnapshot, send, dt = 1 / 60, localSeat = 2, remoteSeat = 1, delay = 1, now = () => Date.now() }) {
   const local = new Map();          // tick → our encoded intent scheduled for it
   let predTick = world.tick;        // the predicted world runs up to here
   let hostCarried = null;           // the host's last confirmed input, for extrapolating it
@@ -149,7 +149,7 @@ export function createGuestSync({ world, stepWorld, cloneWorld, applySnapshot, s
       if (t - lastPing > 1000) { lastPing = t; pingN++; pingAt = t; send({ t: 'ping', n: pingN }); }
       if (t - windowAt > 2000) {
         if (lateWindow > 3 && stats.delay < 8) stats.delay++;
-        else if (lateWindow === 0 && stats.delay > 2 && stats.rtt < (stats.delay - 2) * dt * 1000) stats.delay--;
+        else if (lateWindow === 0 && stats.delay > 1 && stats.rtt < (stats.delay - 1) * dt * 1000) stats.delay--;
         lateWindow = 0; windowAt = t;
       }
     },

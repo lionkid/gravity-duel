@@ -29,20 +29,20 @@ export const MOVE = {
   aimMoveMul: 0.6,      // movement speed while aiming
   landLagSpeed: 40,     // impact speed that costs a landing recovery
   landLag: 0.14,
-  inputBuffer: 0.15,    // seconds a press stays valid
+  inputBuffer: 0.2,     // seconds a press stays valid (covers a weapon draw or the end of a recovery)
 };
 
 // Weapon classes: what the player picks. Every mech carries the vulcan plus one ranged and one melee
 // weapon; the class decides which ones. Armour trades one damage kind against the other.
 export const WEAPON_CLASSES = {
   normal: { id: 'normal', zh: '普通', desc: '火箭砲與光劍，兩頭都能打' },
-  ranged: { id: 'ranged', zh: '遠程', desc: '長距離步槍一擊 135，近戰只有短刀' },
-  melee: { id: 'melee', zh: '近戰', desc: '巨劍一擊 280、起手有霸體，遠程只有會下墜的手砲' },
+  ranged: { id: 'ranged', zh: '遠程', desc: '長距離步槍一擊 135、彈速極快，近戰只有短刀' },
+  melee: { id: 'melee', zh: '近戰', desc: '巨劍一擊 300、起手有霸體，遠程只有會下墜的手砲' },
 };
 export const ARMORS = {
   normal: { id: 'normal', zh: '標準裝甲', desc: '沒有弱點，而且是最快的一套', ranged: 1, light: 1, melee: 1, speed: 1.08 },
   antiRanged: { id: 'antiRanged', zh: '防遠程', desc: '遠程 ×0.8、火神砲 ×0.7，近戰 ×1.45，慢', ranged: 0.8, light: 0.7, melee: 1.45, speed: 0.88 },
-  antiMelee: { id: 'antiMelee', zh: '防近戰', desc: '近戰 ×0.6，遠程 ×1.05、火神砲 ×1.08', ranged: 1.05, light: 1.08, melee: 0.6, speed: 0.97 },
+  antiMelee: { id: 'antiMelee', zh: '防近戰', desc: '近戰 ×0.55，遠程與火神砲 ×1.05', ranged: 1.05, light: 1.05, melee: 0.55, speed: 0.97 },
 };
 export const WEAPONS = {
   // Hip-fired straight ahead along the body, level: no aiming, so height differences beat it.
@@ -50,23 +50,29 @@ export const WEAPONS = {
   vulcan: { id: 'vulcan', zh: '火神砲', kind: 'light', dmg: 8, rate: 8, spread: 0.05, range: 150, speed: 260, gravityScale: 0.15, heatTime: 3, cool: 0.6, overheatUntil: 0.4, stun: 0.04, knock: 4, color: 0xffb060, look: 'rocketS' },
   // Fired only while aiming in first person, along the view angles.
   ranged: {
-    normal: { id: 'rocket', zh: '火箭砲', kind: 'ranged', dmg: 95, interval: 0.9, speed: 380, gravityScale: 0.1, energy: 30, energyMax: 100, regen: 18, zoomFov: 40, aimMoveMul: 0.6, ttl: 2.5, stun: 0.35, knock: 16, color: 0xff9a4a, look: 'rocketM' },
-    ranged: { id: 'longrifle', zh: '長距離步槍', kind: 'ranged', dmg: 135, interval: 1.9, speed: 900, gravityScale: 0, energy: 38, energyMax: 100, regen: 18, zoomFov: 30, aimMoveMul: 0.4, ttl: 2, stun: 0.45, knock: 20, color: 0xa0ffea, look: 'bolt' },
-    melee: { id: 'handcannon', zh: '手砲', kind: 'ranged', dmg: 36, interval: 0.5, speed: 260, gravityScale: 0.5, energy: 18, energyMax: 100, regen: 25, zoomFov: 45, aimMoveMul: 0.7, ttl: 3, stun: 0.15, knock: 8, color: 0xffd27a, look: 'shell' },
+    // Quick to fire again (the burst is limited by energy, so sustained damage stays the same) and fast in flight.
+    normal: { id: 'rocket', zh: '火箭砲', kind: 'ranged', dmg: 90, interval: 0.55, speed: 450, gravityScale: 0.1, energy: 34, energyMax: 100, regen: 20, zoomFov: 40, aimMoveMul: 0.6, ttl: 2.0, stun: 0.35, knock: 16, color: 0xff9a4a, look: 'rocketM' },
+    ranged: { id: 'longrifle', zh: '長距離步槍', kind: 'ranged', dmg: 135, interval: 1.3, speed: 1200, gravityScale: 0, energy: 55, energyMax: 100, regen: 23, zoomFov: 30, aimMoveMul: 0.4, ttl: 1.2, stun: 0.45, knock: 20, color: 0xa0ffea, look: 'bolt' },
+    melee: { id: 'handcannon', zh: '手砲', kind: 'ranged', dmg: 36, interval: 0.35, speed: 320, gravityScale: 0.5, energy: 24, energyMax: 100, regen: 28, zoomFov: 45, aimMoveMul: 0.7, ttl: 2.5, stun: 0.15, knock: 8, color: 0xffd27a, look: 'shell' },
   },
-  // Lock-on lunge then swing. combo lists the swings in order (style: how the arm moves, knock: how
-  // far the hit throws); reach/width is the hit box ahead. Later swings step in so a combo connects.
+  // Lock-on lunge and swing. The blade is cocked *while* closing in, so a lunge adds no start-up: the
+  // first hit lands windup seconds after the press (or when the mech arrives, whichever is later).
+  // combo lists the swings in order (style: how the body moves, knock: how far the hit throws);
+  // reach/width is the hit box ahead. Later swings step in so a combo connects.
   melee: {
-    normal: { id: 'saber', zh: '光劍', kind: 'melee', combo: [{ dmg: 120, windup: 0.14, active: 0.14, recovery: 0.26, style: 'slashR', knock: 8 }, { dmg: 120, windup: 0.12, active: 0.14, recovery: 0.26, style: 'slashL', knock: 8 }, { dmg: 180, windup: 0.2, active: 0.16, recovery: 0.42, style: 'overhead', knock: 30 }], lungeRange: 45, lungeDist: 30, lungeSpeed: 120, stepSpeed: 40, reach: 14, width: 14, stun: 0.35, superArmor: false, guardBreak: false, color: 0x58e0ff, bladeScale: [1, 1, 1] },
-    melee: { id: 'greatblade', zh: '巨劍', kind: 'melee', combo: [{ dmg: 280, windup: 0.38, active: 0.18, recovery: 0.55, style: 'overhead', knock: 34 }], lungeRange: 50, lungeDist: 40, lungeSpeed: 130, stepSpeed: 40, reach: 17, width: 18, stun: 0.6, superArmor: true, guardBreak: true, color: 0xff7a3d, bladeScale: [1.8, 1.25, 1.8] },
-    ranged: { id: 'knife', zh: '短刀', kind: 'melee', combo: [{ dmg: 90, windup: 0.1, active: 0.12, recovery: 0.2, style: 'slashR', knock: 6 }, { dmg: 90, windup: 0.1, active: 0.12, recovery: 0.3, style: 'slashL', knock: 16 }], lungeRange: 30, lungeDist: 20, lungeSpeed: 110, stepSpeed: 40, reach: 11, width: 12, stun: 0.2, superArmor: false, guardBreak: false, color: 0xd9b24c, bladeScale: [0.7, 0.6, 0.7] },
+    normal: { id: 'saber', zh: '光劍', kind: 'melee', combo: [{ dmg: 130, windup: 0.1, active: 0.12, recovery: 0.22, style: 'slashR', knock: 8 }, { dmg: 130, windup: 0.09, active: 0.12, recovery: 0.22, style: 'slashL', knock: 8 }, { dmg: 200, windup: 0.16, active: 0.18, recovery: 0.4, style: 'spin', knock: 30 }], lungeRange: 45, lungeDist: 30, lungeSpeed: 220, stepSpeed: 60, reach: 14, width: 14, stun: 0.35, superArmor: false, guardBreak: false, color: 0x58e0ff, bladeScale: [1, 1, 1] },
+    melee: { id: 'greatblade', zh: '巨劍', kind: 'melee', combo: [{ dmg: 300, windup: 0.26, active: 0.2, recovery: 0.5, style: 'overhead', knock: 34 }], lungeRange: 50, lungeDist: 40, lungeSpeed: 210, stepSpeed: 60, reach: 17, width: 18, stun: 0.6, superArmor: true, guardBreak: true, color: 0xff7a3d, bladeScale: [1.8, 1.25, 1.8] },
+    ranged: { id: 'knife', zh: '短刀', kind: 'melee', combo: [{ dmg: 95, windup: 0.06, active: 0.1, recovery: 0.16, style: 'slashR', knock: 6 }, { dmg: 95, windup: 0.06, active: 0.1, recovery: 0.26, style: 'slashL', knock: 16 }], lungeRange: 30, lungeDist: 20, lungeSpeed: 240, stepSpeed: 60, reach: 11, width: 12, stun: 0.2, superArmor: false, guardBreak: false, color: 0xd9b24c, bladeScale: [0.7, 0.6, 0.7] },
   },
 };
 export const SLOTS = ['melee', 'vulcan', 'ranged'];      // the order the 1 / 2 / 3 keys and the HUD use
 export const COMBAT = {
   hp: 1200,
-  switchDraw: 0.3,        // seconds after a switch before the new weapon can attack
-  switchCooldown: 2.5,    // seconds before switching again
+  switchDraw: 0.12,       // seconds after a switch before the new weapon can attack
+  switchCooldown: 1.6,    // seconds before switching again
+  hipFire: true,          // the ranged weapon also fires at a locked target without aiming (no zoom, some scatter)
+  hipSpread: 0.02,        // radians of scatter on a hip shot
+  hipRange: 220,          // metres: hip shots only at targets this close
   guardMul: 0.5,
   guardBreakStun: 0.8,
   muzzleHeight: 13,       // vulcan and rifle leave the body at chest height
@@ -97,7 +103,7 @@ export const CAMERA = {
   // Lock-on: behind and above the player, pulling back and up as the opponent gets farther so both stay in frame.
   lock: { distance: 42, height: 18, farDistance: 30, farHeight: 24, lookWeight: 0.42, pivotHeight: 14, fov: 58 },
   fp: { eyeHeight: 16, forward: 3, fov: 40 },
-  blend: 0.22,
+  blend: 0.12,                  // camera cut time between rigs (into and out of aiming)
   pitchDefault: -0.32,
   sensitivity: 0.0012,          // radians per pixel at the 1.0 slider setting
   keyLookRate: { yaw: 2.4, pitch: 1.6 },

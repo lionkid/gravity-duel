@@ -60,11 +60,18 @@ test('ranged weapons fire only while aiming, cost energy and hit where aimed', (
   const [a, b] = w.fighters;
   run(w, 30, toRanged);
   assert.equal(a.active, 'ranged');
+  // Locked on, a press without aiming is a hip shot; with lock-on switched off there is nothing to shoot at.
+  run(w, 2, (it, i) => { if (i === 0) it.pressed.attack = true; });
+  assert.equal(w.projectiles.length, 1, 'a hip shot at the locked target');
+  run(w, Math.round(60 * WEAPONS.ranged.normal.interval) + 5, (it, i) => { if (i === 0) it.pressed.lock = true; });
+  assert.equal(a.lock, 0);
+  clearEvents(w);
   run(w, 10, (it, i) => { if (i === 0) it.pressed.attack = true; });
-  assert.equal(w.projectiles.length, 0, 'no shot without aiming');
+  assert.equal(eventsOf(w, 'shot').length, 0, 'no shot without aiming or a lock');
+  assert.ok(eventsOf(w, 'dry').length === 1, 'the press is refused audibly');
   const e0 = a.energy;
   run(w, 90, (it, i) => { it.held.aim = true; Object.assign(it.aim, aimAt(a, b)); if (i === 0) it.pressed.attack = true; });
-  assert.equal(b.hp, b.hpMax - WEAPONS.ranged.normal.dmg, `rocket damage, hp ${b.hp}`);
+  assert.ok(b.hp <= b.hpMax - WEAPONS.ranged.normal.dmg && b.hp >= b.hpMax - 2 * WEAPONS.ranged.normal.dmg, `rocket damage, hp ${b.hp}`);
   assert.ok(e0 - a.energy < WEAPONS.ranged.normal.energy && a.energy < WEAPONS.ranged.normal.energyMax, 'energy spent and regenerating');
   const hit = eventsOf(w, 'hit')[0];
   assert.ok(hit && hit.by === 1 && hit.kind === 'ranged');
@@ -163,11 +170,11 @@ test('switching has a draw time and a cooldown', () => {
   assert.equal(a.active, 'melee');
   run(w, 3, (it, i) => { if (i === 0) it.pressed.switch3 = true; });
   assert.equal(a.active, 'melee', 'cannot switch again during the cooldown');
-  run(w, 60 * 2.6, () => {});
+  run(w, Math.round(60 * (COMBAT.switchCooldown + 0.1)), () => {});
   run(w, 2, (it, i) => { if (i === 0) it.pressed.switch2 = true; });
   assert.equal(a.active, 'vulcan');
   clearEvents(w);
-  run(w, 10, (it) => { it.held.attack = true; });
+  run(w, Math.max(1, Math.round(60 * COMBAT.switchDraw) - 2), (it) => { it.held.attack = true; });
   assert.equal(eventsOf(w, 'shot').length, 0, 'drawing: no fire yet');
   run(w, 20, (it) => { it.held.attack = true; });
   assert.ok(eventsOf(w, 'shot').length > 0, 'fires once drawn');

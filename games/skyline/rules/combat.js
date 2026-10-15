@@ -10,7 +10,7 @@
 //   stun / guard / guardBreak   recovery after being hit / holding guard / recovering from a guard break
 //   lock / lockLost / autoLock  target id or 0 / seconds without line of sight / re-lock when seen again
 
-import { yawToDir, aimToDir, dirToYaw, distXZ, approachAngle } from '../../../engine/core/math.js';
+import { yawToDir, aimToDir, dirToAim, dirToYaw, distXZ, approachAngle } from '../../../engine/core/math.js';
 import { boxAt, overlaps } from '../../../engine/sim/aabb.js';
 import { bodyBox } from '../../../engine/sim/controller.js';
 import { raycast, lineOfSight, segmentBody } from '../../../engine/sim/sweep.js';
@@ -105,13 +105,15 @@ export function stepCombat(world, f, it, dt) {
     const e = enemyOf(world, f);
     m.t += dt;
     if (m.stage === 'lunge') {
+      // Closing in and cocking the blade at the same time: the swing starts as soon as both the
+      // wind-up and the approach are done, so a lunge costs no extra start-up.
       out.lockMove = true;
       const dir = e ? { x: e.pos.x - f.pos.x, z: e.pos.z - f.pos.z } : yawToDir(f.yaw);
       const d = Math.hypot(dir.x, dir.z) || 1;
       out.face = dirToYaw(dir.x, dir.z);
-      const close = e && distXZ(f.pos, e.pos) <= w.reach * 0.8;
-      if (close || m.t >= w.lungeDist / w.lungeSpeed || !e) { m.stage = 'windup'; m.t = 0; }
-      else out.lunge = { x: dir.x / d * w.lungeSpeed, z: dir.z / d * w.lungeSpeed };
+      const arrived = !e || distXZ(f.pos, e.pos) <= w.reach * 0.8 || m.t >= w.lungeDist / w.lungeSpeed;
+      if (!arrived) out.lunge = { x: dir.x / d * w.lungeSpeed, z: dir.z / d * w.lungeSpeed };
+      if (arrived && m.t >= swing.windup) { m.stage = 'active'; m.t = 0; m.hit = false; emit(world, 'slash', { id: f.id, x: f.pos.x, y: f.pos.y, z: f.pos.z, yaw: f.yaw, combo: m.combo, style: swing.style, color: w.color }); }
     }
     if (m.stage === 'windup') {
       out.lockMove = true;
@@ -137,7 +139,7 @@ export function stepCombat(world, f, it, dt) {
     if (m.stage === 'recovery') {
       out.lockMove = true;
       // Chain the next swing on a buffered press.
-      if (f.buf.attack > 0 && m.combo + 1 < w.combo.length && m.t >= swing.recovery * 0.4) {
+      if (f.buf.attack > 0 && m.combo + 1 < w.combo.length && m.t >= swing.recovery * 0.3) {
         f.buf.attack = 0;
         f.melee = { stage: 'windup', t: 0, combo: m.combo + 1, hit: false };
       } else if (m.t >= swing.recovery) f.melee = null;
@@ -153,9 +155,24 @@ export function stepCombat(world, f, it, dt) {
     } else if (f.active === 'vulcan' && it.held.attack && !f.overheated) {
       firedVulcan = true;
       fireVulcan(world, f, dt);
-    } else if (f.active === 'ranged' && f.aiming && f.buf.attack > 0 && f.fireCd <= 0 && f.energy >= ranged.energy) {
-      f.buf.attack = 0;
-      fireRanged(world, f, ranged);
+    } else if (f.active === 'vulcan' && it.pressed.attack && f.overheated) {
+      emit(world, 'dry', { id: f.id, reason: 'heat' });
+    } else if (f.active === 'ranged' && f.buf.attack > 0) {
+      const e = enemyOf(world, f);
+      if (f.fireCd > 0 || f.energy < ranged.energy) {
+        if (it.pressed.attack) emit(world, 'dry', { id: f.id, reason: f.energy < ranged.energy ? 'energy' : 'cooldown' });
+      } else if (f.aiming) {
+        f.buf.attack = 0;
+        fireRanged(world, f, ranged);
+      } else if (COMBAT.hipFire && !it.held.aim && f.lock && f.lockLos && e && !e.dead && distXZ(f.pos, e.pos) <= COMBAT.hipRange) {
+        // Hip fire at the locked target: answers at once, with no zoom and a little scatter.
+        f.buf.attack = 0;
+        const to = { x: e.pos.x - f.pos.x, y: e.pos.y + 11 - (f.pos.y + COMBAT.muzzleHeight + 2), z: e.pos.z - f.pos.z };
+        const aim = dirToAim(to);
+        aim.yaw += (world.rnd() - 0.5) * 2 * COMBAT.hipSpread;
+        aim.pitch += (world.rnd() - 0.5) * 2 * COMBAT.hipSpread;
+        fireRanged(world, f, ranged, aim);
+      } else if (it.pressed.attack) emit(world, 'dry', { id: f.id, reason: 'aim' });
     }
   }
 
@@ -191,10 +208,10 @@ function fireVulcan(world, f, dt) {
   }
 }
 
-function fireRanged(world, f, w) {
+function fireRanged(world, f, w, aim = f.aim) {
   f.energy -= w.energy;
   f.fireCd = w.interval;
-  const dir = aimToDir(f.aim.yaw, f.aim.pitch);
+  const dir = aimToDir(aim.yaw, aim.pitch);
   const from = { x: f.pos.x + dir.x * 6, y: f.pos.y + COMBAT.muzzleHeight + 2 + dir.y * 6, z: f.pos.z + dir.z * 6 };
   world.projectiles.push({
     id: ++world.nextId, owner: f.id, kind: w.id, look: w.look, dmgKind: w.kind, dmg: w.dmg, stun: w.stun, knock: w.knock, color: w.color,

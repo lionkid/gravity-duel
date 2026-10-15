@@ -8,6 +8,8 @@ export const RECIPES = {
   boomS: (s, o) => { if (!s.throttle('boomS', 0.04)) return; s.noise('lowpass', 1200, 200, 0.22, 0.35, o); s.tone('sine', 140, 50, 0.18, 0.2, o); },
   boomM: (s, o) => { s.noise('lowpass', 1500, 90, 0.8, 0.8, o); s.tone('sine', 95, 30, 0.65, 0.5, o); },
   slash: (s, o) => { s.noise('bandpass', 700, 2800, 0.18, 0.3, o, 3); s.tone('sawtooth', 190, 90, 0.2, 0.06, o); },
+  swingHeavy: (s, o) => { s.noise('bandpass', 260, 1500, 0.32, 0.5, o, 2.5); s.tone('sawtooth', 140, 45, 0.3, 0.12, o); s.tone('sine', 70, 40, 0.25, 0.2, o, 0.05); },
+  dry: (s, o) => { s.tone('square', 1500, 1000, 0.025, 0.07, o); s.noise('highpass', 3000, 2000, 0.03, 0.08, o); },
   lunge: (s, o) => { s.noise('bandpass', 400, 1800, 0.3, 0.3, o, 2); },
   hit: (s, o) => { s.noise('lowpass', 2600, 300, 0.14, 0.35, o); s.tone('square', 190, 70, 0.1, 0.12, o); },
   hitHeavy: (s, o) => { s.noise('lowpass', 2000, 100, 0.35, 0.6, o); s.tone('square', 130, 38, 0.26, 0.25, o); s.tone('sine', 60, 30, 0.3, 0.3, o); },
@@ -37,7 +39,8 @@ export function soundForEvent(sfx, e, world, localId = 1) {
   switch (e.t) {
     case 'shot': sfx.play(e.kind === 'vulcan' ? 'vulcan' : e.kind === 'rocket' ? 'rocket' : e.kind === 'longrifle' ? 'longrifle' : 'handcannon', at); break;
     case 'impact': sfx.play(e.look === 'rocketM' ? 'boomM' : 'boomS', at); break;
-    case 'slash': sfx.play('slash', at); break;
+    case 'slash': sfx.play(e.style === 'overhead' || e.style === 'spin' ? 'swingHeavy' : 'slash', at); break;
+    case 'dry': if (e.id === localId) sfx.play('dry', null); break;
     case 'melee': if (e.lunge) sfx.play('lunge', fighterPos(e.id)); break;
     case 'hit': sfx.play(e.broke ? 'broke' : e.guard ? 'guard' : e.amount >= 120 || e.final ? 'hitHeavy' : 'hit', at); break;
     case 'jump': sfx.play('jump', fighterPos(e.id)); break;

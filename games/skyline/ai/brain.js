@@ -33,6 +33,8 @@ export function createAI(level = 'normal', seed = 1) {
     wantSlot: 'vulcan', range: RANGE.normal,
     dodgeT: 0, dodgeDir: { x: 0, z: 0 }, guardT: 0, dashT: 0,
     roofGoal: null, roofT: 0, comboPressed: -1,
+    lastThreat: null, threatT: 0,
+    seenProj: new Set(), dodgeAt: 0, dodgeRoll: false,
   };
 }
 
@@ -67,6 +69,32 @@ export function aiIntent(ai, world, playerId, dt) {
   if (ai.aimErrT <= 0) { ai.aimErrT = 0.25; ai.aimErr.yaw = (ai.rnd() - 0.5) * 2 * k.aimErr; ai.aimErr.pitch = (ai.rnd() - 0.5) * 2 * k.aimErr; }
   if (ai.strafeT <= 0) { ai.strafeT = 1.5 + ai.rnd() * 1.5; ai.strafe = ai.rnd() < 0.5 ? -1 : 1; }
   if (ai.decideT <= 0) { ai.decideT = k.decide; decide(ai, me, e, world, dist, dy, los); }
+  // Incoming fire: every new shell on a collision course gets one dodge roll, taken after the
+  // difficulty's reaction time, however fast the shell flies. Vulcan rounds are not worth a dash.
+  if (los) {
+    for (const p of world.projectiles) {
+      if (p.owner === me.id || p.dmgKind === 'light' || ai.seenProj.has(p.id)) continue;
+      ai.seenProj.add(p.id);
+      if (ai.dodgeAt <= 0 && closing(p, me) < 14) { ai.dodgeAt = k.reaction * 0.5 + 1e-6; ai.dodgeRoll = ai.rnd() < k.dodge; }
+    }
+    if (ai.seenProj.size > 256) ai.seenProj.clear();
+  }
+  if (ai.dodgeAt > 0) {
+    ai.dodgeAt -= dt;
+    if (ai.dodgeAt <= 0 && ai.dodgeRoll && ai.dodgeT <= 0 && me.fuel >= MOVE.dashFuel) dodge(ai, me, e);
+  }
+  // A melee wind-up in reach gets one reaction per swing, after the difficulty's reaction time: guard
+  // or step aside. Fast swings beat slow reactions, as they should.
+  if (los && e.melee && (e.melee.stage === 'lunge' || e.melee.stage === 'windup') && dist < 45) {
+    if (ai.lastThreat !== e.melee) { ai.lastThreat = e.melee; ai.threatT = k.reaction * 0.6; }
+    else if (ai.threatT > 0) {
+      ai.threatT -= dt;
+      if (ai.threatT <= 0 && ai.guardT <= 0 && ai.dodgeT <= 0) {
+        if (ai.rnd() < k.guard) ai.guardT = 0.5;
+        else if (ai.rnd() < k.dodge && me.fuel >= MOVE.dashFuel) dodge(ai, me, e);
+      }
+    }
+  }
 
   // ---- movement
   const toT = { x: target.x - me.pos.x, z: target.z - me.pos.z };
@@ -187,15 +215,6 @@ function decide(ai, me, e, world, dist, dy, los) {
     if (dist < ml.lungeRange + (bladeBonus ? 10 : -5) && nearLevel) ai.wantSlot = 'melee';
     else if (dist < 110 && level && me.heat < 0.7 && (!bladeBonus || !canShoot)) ai.wantSlot = 'vulcan';
     else ai.wantSlot = 'ranged';
-  }
-  // Threats: a projectile coming in, or a melee wind-up in reach.
-  if (ai.dodgeT <= 0 && los) {
-    const incoming = world.projectiles.some((p) => p.owner !== me.id && closing(p, me) < 14);
-    if (incoming && ai.rnd() < k.dodge && me.fuel >= MOVE.dashFuel) dodge(ai, me, e);
-  }
-  if (los && e.melee && (e.melee.stage === 'lunge' || e.melee.stage === 'windup') && dist < 40) {
-    if (ai.rnd() < k.guard) ai.guardT = 0.5;
-    else if (ai.rnd() < k.dodge && me.fuel >= MOVE.dashFuel) dodge(ai, me, e);
   }
 }
 

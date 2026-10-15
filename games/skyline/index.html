@@ -61,6 +61,11 @@
   .crosshair::before { left: 14px; top: 0; width: 2px; height: 30px; }
   .crosshair::after { top: 14px; left: 0; width: 30px; height: 2px; }
   .crosshair:not(.ready)::before, .crosshair:not(.ready)::after { background: var(--muted); box-shadow: none; }
+  .crosshair .cdring { position: absolute; left: 50%; top: 50%; width: 58px; height: 58px; margin: -29px 0 0 -29px; border-radius: 50%; background: conic-gradient(var(--accent) calc(var(--cd, 0) * 1turn), rgba(255, 255, 255, 0.1) 0); -webkit-mask: radial-gradient(circle, transparent 24px, #000 25px, #000 28px, transparent 29px); mask: radial-gradient(circle, transparent 24px, #000 25px, #000 28px, transparent 29px); opacity: 0; transition: opacity 0.1s; }
+  .crosshair.cooling .cdring { opacity: 0.9; }
+  .crosshair.deny::before, .crosshair.deny::after { background: var(--hot); box-shadow: 0 0 8px var(--hot); }
+  .reticle.deny { border-color: var(--hot); box-shadow: 0 0 10px rgba(255, 75, 75, 0.6); }
+  .sflash { position: absolute; inset: 0; background: #fff; opacity: 0; mix-blend-mode: screen; }
   .hitmark { left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; transform: rotate(45deg); border: 2px solid #fff; border-top: 0; border-left: 0; transition: none; }
   .vignette { position: absolute; inset: 0; opacity: 0; background: radial-gradient(ellipse at center, transparent 55%, rgba(255, 60, 40, 0.55)); transition: opacity 0.1s; }
   .msg { position: absolute; left: 50%; top: 30%; transform: translateX(-50%); font: 20px var(--display); letter-spacing: 0.2em; color: var(--gold); text-shadow: 0 0 12px rgba(217, 178, 76, 0.6); opacity: 0; transition: opacity 0.2s; }
