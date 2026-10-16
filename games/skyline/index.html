@@ -76,6 +76,8 @@
   .ko.lose .result { color: var(--enemy); text-shadow: 0 0 24px rgba(255, 107, 107, 0.6); }
   .dmgnum { position: absolute; left: 0; top: 0; font: 22px var(--display); color: var(--gold); text-shadow: 0 0 10px rgba(0, 0, 0, 0.9), 0 0 4px rgba(217, 178, 76, 0.6); opacity: 0; transform: translate(-50%, 0); }
   .dmgnum.heavy { font-size: 32px; color: #fff; }
+  .dmgnum.score { font-size: 26px; color: #fff3c4; text-shadow: 0 0 10px rgba(0, 0, 0, 0.9), 0 0 8px rgba(255, 207, 58, 0.8); }
+  .dmgnum.bull { font-size: 34px; color: #ffcf3a; }
   .dmgnum.me { color: var(--enemy); }
   .dmgnum.on { animation: dmgpop 0.9s ease-out forwards; }
   @keyframes dmgpop { 0% { opacity: 1; transform: translate(-50%, 0) scale(1.5); } 20% { transform: translate(-50%, -14px) scale(1); } 100% { opacity: 0; transform: translate(-50%, -52px) scale(0.9); } }
@@ -157,6 +159,31 @@
   .sub.center { text-align: center; }
   @media (max-width: 600px) { .seats { grid-template-columns: 1fr; } }
   .net { position: absolute; right: 16px; top: calc(14px + env(safe-area-inset-top, 0px)); font: 12px var(--mono); color: var(--muted); text-align: right; text-shadow: 0 1px 2px #000; }
+  /* Practice: score panel, clock, countdown, markers over the targets, a hint line. */
+  .practice, .ptimer, .pcount, .phint, .tmark { display: none; }
+  #hud.practice-on .practice, #hud.practice-on .ptimer, #hud.practice-on .tmark.on { display: block; }
+  #hud.practice-on .phint.on, #hud.practice-on .pcount { display: block; }
+  .practice { position: absolute; right: 16px; top: calc(34px + env(safe-area-inset-top, 0px)); min-width: 168px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: rgba(9, 12, 22, 0.62); font: 13px/1.6 var(--body); white-space: pre; color: var(--fg); text-shadow: 0 1px 2px #000; }
+  .practice::first-line { color: var(--gold); font-weight: 700; }
+  .ptimer { position: absolute; left: 50%; top: calc(12px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); font: 30px var(--display); letter-spacing: 0.08em; color: var(--fg); text-shadow: 0 0 12px rgba(0, 0, 0, 0.8); }
+  .ptimer:empty { display: none !important; }
+  .ptimer.urgent { color: var(--hot); text-shadow: 0 0 14px rgba(255, 75, 75, 0.7); }
+  .pcount { position: absolute; left: 50%; top: 38%; transform: translate(-50%, -50%); font: 120px var(--display); color: var(--gold); text-shadow: 0 0 30px rgba(217, 178, 76, 0.7); }
+  .pcount:empty { display: none !important; }
+  .pcount.on { animation: countpop 0.9s ease-out forwards; }
+  @keyframes countpop { 0% { opacity: 0; transform: translate(-50%, -50%) scale(1.8); } 15% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 100% { opacity: 0.85; transform: translate(-50%, -50%) scale(0.94); } }
+  .phint { position: absolute; left: 50%; bottom: calc(118px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); max-width: min(760px, 90vw); padding: 6px 14px; border-radius: 6px; background: rgba(9, 12, 22, 0.6); color: var(--fg); font-size: 13px; text-align: center; text-shadow: 0 1px 2px #000; }
+  .tmark { position: absolute; left: 0; top: 0; width: 0; height: 0; will-change: transform; }
+  .tmark::before { content: ''; position: absolute; left: -7px; top: -7px; width: 12px; height: 12px; border: 2px solid #ffcf3a; transform: rotate(45deg); box-shadow: 0 0 6px rgba(255, 207, 58, 0.6); }
+  .tmark[data-kind="slider"]::before { border-color: #ff8a5a; }
+  .tmark[data-kind="drone"]::before { border-color: #9ff3ff; box-shadow: 0 0 6px rgba(159, 243, 255, 0.7); }
+  .tmark[data-kind="roof"]::before { border-color: #c6ff7a; }
+  .tmark span { position: absolute; left: 10px; top: -8px; font: 11px var(--mono); color: var(--fg); white-space: nowrap; text-shadow: 0 1px 2px #000; }
+  .panel h2.big small { font-size: 22px; margin-left: 6px; letter-spacing: 0.05em; color: var(--muted); }
+  .stats { display: grid; grid-template-columns: auto auto; justify-content: center; gap: 4px 18px; margin: 14px 0 0; font-size: 15px; }
+  .stats dt { color: var(--muted); text-align: right; }
+  .stats dd { margin: 0; font-family: var(--mono); text-align: left; }
+  .rules.small { font-size: 12px; margin-top: 10px; }
   /* Touch controls: a floating stick on the left, camera drag on the right, buttons bottom right. */
   #touch { position: fixed; inset: 0; z-index: 5; touch-action: none; user-select: none; -webkit-user-select: none; }
   #touch[hidden] { display: none; }

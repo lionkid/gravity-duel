@@ -87,8 +87,50 @@ export const STAGES = {
   city: { id: 'city', name: 'Skyline City', zh: '天際城', desc: '傍晚到入夜的大城市：高樓、巷弄、高架道路', theme: 'city', gravity: 32, blocks: 8, pitch: 120, street: 44, minHeight: 25, maxHeight: 130, stepHeight: 45, dusk: { start: 0.08, toNight: 150 } },
   // A third of the gravity: jumps go three times higher and falls are slow. Low domes and boulders for cover, the Earth overhead, always night.
   moon: { id: 'moon', name: 'Mare Skyline', zh: '月面都市', desc: '重力只有三分之一，跳得高、落得慢；矮樓與巨石，地球掛在天上', theme: 'moon', gravity: 11, blocks: 8, pitch: 130, street: 56, minHeight: 12, maxHeight: 64, stepHeight: 22, rocks: 70, dusk: { start: 1, toNight: 1 } },
+  // Open sand between adobe hamlets and flat-topped mesas; dust twisters wander through and throw
+  // mechs into the sky. A long, slow afternoon into sunset.
+  desert: { id: 'desert', name: 'Dune Ruins', zh: '沙漠遺跡', desc: '土牆聚落與平頂岩山，沙塵龍捲風會把機體捲上高空', theme: 'desert', gravity: 32, blocks: 8, pitch: 140, street: 64, minHeight: 10, maxHeight: 46, stepHeight: 22, highway: false, layout: 'village', mesas: 5, emptyLots: 0.25, rocks: 40, spawnZ: 110, twisters: 3, dusk: { start: 0.18, toNight: 360 } },
 };
-export const STAGE_ORDER = ['city', 'moon'];
+export const STAGE_ORDER = ['city', 'moon', 'desert'];
+
+// Sand twisters (stages with `twisters`). Distances in metres, speeds in m/s.
+export const TWISTER = {
+  core: 11,             // inside this radius a mech is lifted off its feet
+  reach: 60,            // the pull starts here
+  height: 170,          // visual height of the column
+  speed: 9,             // how fast a twister wanders
+  pull: 24,             // inward wind at the edge of the core
+  swirl: 18,            // sideways wind at the edge of the core
+  coreSwirl: 26,        // speed around the axis while caught
+  lift: 34, liftAccel: 95,
+  spin: 5,              // rad/s the caught mech turns
+  ejectHeight: 78,      // thrown out once this high
+  maxCaught: 3.2,       // or after this long
+  fling: 42, flingUp: 14,
+  immune: 3.5,          // seconds after a throw or an escape with no pull and no catching
+  grow: 3, fade: 3, live: [18, 28], rest: [3, 8],
+  shotSwirl: 1600,      // m/s² drag on projectiles passing through the core: bends a rocket by several degrees
+};
+
+// Practice mode: bullseye targets ("鏢靶"), a training dummy and a time attack.
+export const PRACTICE = {
+  timed: 60,            // seconds of the time attack
+  ready: 3,             // countdown before it starts
+  respawn: 3.5,         // seconds before a broken target comes back
+  dummyRevive: 3,       // seconds before the knocked-out dummy stands up again
+  turnRate: 1.6,        // rad/s, boards turning on their stands to face the player
+  rings: [10, 8, 6, 4, 2],   // points from the bullseye out; the face is five rings of equal width
+  meleePoints: 6,       // a board cut down with a blade
+  kinds: {
+    stand: { zh: '立靶', radius: 5, height: 14, mult: 1, hp: 30 },
+    roof: { zh: '屋頂靶', radius: 5, mult: 1.5, hp: 30 },
+    slider: { zh: '移動靶', radius: 4.5, height: 14, mult: 2, hp: 30 },
+    drone: { zh: '浮空靶', radius: 3.6, mult: 2.5, hp: 20 },
+  },
+  counts: { stand: 8, roof: 5, slider: 3, drone: 4 },
+  modes: { free: { zh: '自由練習', desc: '靶子打掉會重生，沒有時間限制' }, timed: { zh: '60 秒挑戰', desc: '60 秒內盡量拿分，紀錄會保存' } },
+  dummies: { stand: { zh: '站著不動', desc: '假人站在原地，適合練連段與鎖定' }, move: { zh: '左右移動', desc: '假人會橫移、跳躍，練習追擊' } },
+};
 
 // Picture quality: bloom, the cap on the device pixel ratio (render resolution) and particle counts.
 export const QUALITY = {

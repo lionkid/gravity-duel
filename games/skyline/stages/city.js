@@ -7,20 +7,49 @@
 // the centre. Every block keeps at least one low "step" building so roofs can be climbed in stages.
 // An elevated highway loops around the inner blocks: the fastest way around, with no cover, reached
 // by four ramps from the central streets. Mechs fit under its deck.
+//
+// The same grid makes the desert: `layout: 'village'` fills lots with small adobe houses instead of
+// towers, `mesas` turns some lots into two-tiered flat-topped rocks, `emptyLots` leaves open sand
+// with a few boulders, `spawnZ` sets how far apart the mechs start and `twisters` asks the world for
+// sand twisters (stage.hazards). Without these options the city and the moon come out exactly as before.
 
 import { makeRng } from '../../../engine/core/rng.js';
 
 export function generateCity(opts = {}) {
-  const o = Object.assign({ seed: 1, blocks: 8, pitch: 100, street: 30, minHeight: 25, maxHeight: 130, stepHeight: 45, gravity: 32, highway: true, rocks: 0, id: 'city', theme: 'city' }, opts);
+  const o = Object.assign({ seed: 1, blocks: 8, pitch: 100, street: 30, minHeight: 25, maxHeight: 130, stepHeight: 45, gravity: 32, highway: true, rocks: 0, id: 'city', theme: 'city',
+    layout: 'blocks', mesas: 0, emptyLots: 0, spawnZ: 0, twisters: 0 }, opts);
   const rnd = makeRng(o.seed);
   const half = o.blocks * o.pitch / 2;
   const lot = o.pitch - o.street;
   const statics = [], roads = [], ramps = [];
 
+  // Spawns face each other down the central north–south street (inside the highway loop, if any).
+  const loopR = Math.max(1, Math.floor(o.blocks / 4)) * o.pitch;
+  const sz = o.spawnZ || (o.highway && o.blocks >= 4 ? Math.min(80, loopR - o.street / 2 - HW.rampLen - 25) : half - o.pitch / 2);
+  const spawns = [{ pos: { x: 0, y: 0, z: sz }, yaw: 0 }, { pos: { x: 0, y: 0, z: -sz }, yaw: Math.PI }];
+
+  // Lots that are mesas or open sand (desert), chosen with their own generator so the plain city
+  // draws exactly the same numbers as before.
+  const special = new Map();
+  if (o.mesas || o.emptyLots) {
+    const r2 = makeRng((Math.imul(o.seed >>> 0, 7919) + 13) >>> 0);
+    const keys = [];
+    for (let bi = 0; bi < o.blocks; bi++) for (let bj = 0; bj < o.blocks; bj++) keys.push([bi, bj]);
+    const centre = ([bi, bj]) => [-half + o.pitch / 2 + bi * o.pitch, -half + o.pitch / 2 + bj * o.pitch];
+    const farFromSpawns = (k) => { const [x, z] = centre(k); return spawns.every((sp) => Math.hypot(sp.pos.x - x, sp.pos.z - z) > o.pitch * 1.2); };
+    const pool = keys.filter(farFromSpawns);
+    for (let n = 0; n < o.mesas && pool.length; n++) special.set(pool.splice(r2.int(pool.length), 1)[0].join(','), 'mesa');
+    for (const k of keys) if (!special.has(k.join(',')) && r2() < o.emptyLots) special.set(k.join(','), 'empty');
+  }
+
   for (let bi = 0; bi < o.blocks; bi++) {
     for (let bj = 0; bj < o.blocks; bj++) {
       const cx = -half + o.pitch / 2 + bi * o.pitch;
       const cz = -half + o.pitch / 2 + bj * o.pitch;
+      const kind = special.get(`${bi},${bj}`);
+      if (kind === 'mesa') { buildMesa(rnd, o, cx, cz, lot, statics); continue; }
+      if (kind === 'empty') { scatterLotRocks(rnd, cx, cz, lot, statics); continue; }
+      if (o.layout === 'village') { buildVillage(rnd, o, cx, cz, lot, statics); continue; }
       const dist = Math.max(Math.abs(cx), Math.abs(cz)) / half;         // 0 centre … ~1 edge
       const base = o.maxHeight + (o.minHeight - o.maxHeight) * Math.pow(dist, 0.9);
       const boxes = layoutLot(rnd, cx, cz, lot);
@@ -47,10 +76,6 @@ export function generateCity(opts = {}) {
   const lamps = [], lanes = [];
   if (o.highway && o.blocks >= 4) highway = buildHighway(o, statics, ramps, lamps, lanes);
 
-  // Spawns face each other down the central north–south street, inside the highway loop.
-  const sz = highway ? Math.min(80, highway.R - o.street / 2 - HW.rampLen - 25) : half - o.pitch / 2;
-  const spawns = [{ pos: { x: 0, y: 0, z: sz }, yaw: 0 }, { pos: { x: 0, y: 0, z: -sz }, yaw: Math.PI }];
-
   // Boulders in the streets (the moon): low cover against the vulcan, never on the central cross where
   // the spawns and ramps are, never touching anything else.
   if (o.rocks > 0) scatterRocks(rnd, o, half, statics, spawns);
@@ -66,8 +91,53 @@ export function generateCity(opts = {}) {
     ramps,
     spawns,
     highway,
+    hazards: o.twisters ? { twisters: { count: o.twisters } } : null,
     visual: { roads, lamps, lanes, pitch: o.pitch, street: o.street },
   };
+}
+
+// A mesa: a broad base tier and a narrower, taller top, both solid rock.
+function buildMesa(rnd, o, cx, cz, lot, statics) {
+  const L = lot - 12;
+  const w = L * rnd.range(0.78, 1), d = L * rnd.range(0.78, 1), H = Math.round(rnd.range(62, 95));
+  const seed = rnd.int(1000);
+  statics.push({ min: [cx - w / 2, 0, cz - d / 2], max: [cx + w / 2, Math.round(H * 0.68), cz + d / 2], tag: 'mesa', tint: rnd.int(3), seed });
+  const tw = w * rnd.range(0.45, 0.65), td = d * rnd.range(0.45, 0.65);
+  const ox = rnd.range(-(w - tw) / 2, (w - tw) / 2), oz = rnd.range(-(d - td) / 2, (d - td) / 2);
+  statics.push({ min: [cx + ox - tw / 2, 0, cz + oz - td / 2], max: [cx + ox + tw / 2, H, cz + oz + td / 2], tag: 'mesa', tint: rnd.int(3), seed });
+}
+
+// A hamlet: two to five small houses scattered over the lot with alleys between them, mostly low,
+// now and then a watchtower; at least one low enough to climb onto in one jump.
+function buildVillage(rnd, o, cx, cz, lot, statics) {
+  const inset = 6, L = lot - inset * 2, gap = 9;
+  const want = 2 + rnd.int(4);
+  const placed = [];
+  for (let tries = 0; tries < 60 && placed.length < want; tries++) {
+    const w = Math.round(rnd.range(12, 26)), d = Math.round(rnd.range(12, 26));
+    const x = cx + rnd.range(-(L - w) / 2, (L - w) / 2), z = cz + rnd.range(-(L - d) / 2, (L - d) / 2);
+    if (placed.some((b) => Math.abs(b.x - x) < (b.w + w) / 2 + gap && Math.abs(b.z - z) < (b.d + d) / 2 + gap)) continue;
+    placed.push({ x, z, w, d });
+  }
+  placed.forEach((b, i) => {
+    let h = o.minHeight + (o.stepHeight - o.minHeight) * rnd();
+    if (i > 0 && rnd.chance(0.22)) h = rnd.range(o.stepHeight + 6, o.maxHeight);
+    h = Math.round(Math.min(o.maxHeight, Math.max(o.minHeight, h)));
+    statics.push({ min: [b.x - b.w / 2, 0, b.z - b.d / 2], max: [b.x + b.w / 2, h, b.z + b.d / 2], tag: 'building', tint: rnd.int(5), seed: rnd.int(1000) });
+  });
+}
+
+// Open sand with a few big boulders for cover.
+function scatterLotRocks(rnd, cx, cz, lot, statics) {
+  const L = lot - 16, n = 2 + rnd.int(4);
+  for (let k = 0, tries = 0; k < n && tries < 40; tries++) {
+    const w = rnd.range(5, 14), d = rnd.range(5, 14), h = rnd.range(4, 12);
+    const x = cx + rnd.range(-(L - w) / 2, (L - w) / 2), z = cz + rnd.range(-(L - d) / 2, (L - d) / 2);
+    const box = { min: [x - w / 2, 0, z - d / 2], max: [x + w / 2, h, z + d / 2], tag: 'rock', tint: rnd.int(4), seed: rnd.int(1000) };
+    if (statics.some((s) => box.max[0] + 4 > s.min[0] && box.min[0] - 4 < s.max[0] && box.max[2] + 4 > s.min[2] && box.min[2] - 4 < s.max[2])) continue;
+    statics.push(box);
+    k++;
+  }
 }
 
 function scatterRocks(rnd, o, half, statics, spawns) {

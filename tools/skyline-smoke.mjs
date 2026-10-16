@@ -157,6 +157,76 @@ await page.close();
   await ctx.close();
 }
 
+// Practice mode through the menus: an aimed rocket into the nearest board, with the simulation held
+// still and stepped by hand so slow software rendering cannot miss the moment.
+{
+  const pp = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  pp.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+  await pp.goto(`http://127.0.0.1:${port}/games/skyline/?seed=7&bloom=0`, { timeout: 60000 });
+  await pp.waitForFunction(() => window.__skyline && window.__skyline.ui.name === 'title', null, { timeout: 30000 });
+  await pp.click('[data-act="practice"]');
+  await pp.click('.opt[data-kind="pmode"][data-id="free"]');
+  await pp.click('[data-act="start"]');
+  await pp.waitForFunction(() => window.__skyline.inBattle && window.__skyline.practice, null, { timeout: 30000 });
+  const press = async (code, ticks = 1) => { await pp.keyboard.down(code); await pp.evaluate((n) => window.__skyline.tick(n), ticks); await pp.keyboard.up(code); };
+  await pp.evaluate(() => { const S = window.__skyline; S.freeze(true); S.tick(20); });
+  // A firing spot 60 m from the nearest standing board, along a street axis, with a clear line to it.
+  const tg = await pp.evaluate(() => {
+    const w = window.__skyline.world, me = w.fighters[0];
+    const solid = (x, y, z, r) => { const b = { min: [x - r, y - r, z - r], max: [x + r, y + r, z + r] };
+      return w.statics.query(b).some((s) => b.min[0] < s.max[0] && b.max[0] > s.min[0] && b.min[1] < s.max[1] && b.max[1] > s.min[1] && b.min[2] < s.max[2] && b.max[2] > s.min[2]); };
+    const clear = (a, b) => { for (let i = 1; i < 40; i++) { const u = i / 40; if (solid(a.x + (b.x - a.x) * u, a.y + (b.y - a.y) * u, a.z + (b.z - a.z) * u, 0.6)) return false; } return true; };
+    const boards = w.targets.filter((x) => x.kind === 'stand').sort((a, b) => Math.hypot(a.pos.x - me.pos.x, a.pos.z - me.pos.z) - Math.hypot(b.pos.x - me.pos.x, b.pos.z - me.pos.z));
+    for (const t of boards) {
+      for (const [ox, oz] of [[0, 60], [0, -60], [60, 0], [-60, 0]]) {
+        const p = { x: t.pos.x + ox, y: 0, z: t.pos.z + oz };
+        if (solid(p.x, 9, p.z, 6) || !clear({ x: p.x, y: 15, z: p.z }, t.pos)) continue;
+        me.pos.x = p.x; me.pos.z = p.z; me.pos.y = 0;
+        return { x: t.pos.x, y: t.pos.y, z: t.pos.z, count: w.targets.length };
+      }
+    }
+    return null;
+  });
+  if (!tg) errors.push('practice: no clear firing spot found');
+  else {
+  await press('Digit3', 14);
+  await pp.keyboard.down('KeyK');
+  await pp.evaluate((t) => { const S = window.__skyline, me = S.world.fighters[0]; const dx = t.x - me.pos.x, dy = t.y - (me.pos.y + 15), dz = t.z - me.pos.z;
+    for (let i = 0; i < 20; i++) { S.look.yaw = Math.atan2(-dx, -dz); S.look.pitch = Math.atan2(dy, Math.hypot(dx, dz)); S.tick(1); } }, tg);
+  await pp.waitForTimeout(1200);                          // let the aim camera settle before the shot
+  await press('KeyJ', 10);
+  await pp.waitForTimeout(500);
+  await pp.screenshot({ path: path.join(outDir, '16-practice.png') });
+  await pp.keyboard.up('KeyK');
+  const P = await pp.evaluate(() => window.__skyline.world.practice);
+  console.log(`  saved 16-practice.png; ${tg.count} targets, score ${P.score}, bullseyes ${P.bulls}, shots ${P.shots}`);
+  if (!(P.score > 0)) errors.push('practice: the aimed rocket did not score');
+  }
+  await pp.close();
+}
+
+// The desert with a twister picking the player up.
+{
+  const pd = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  pd.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+  await pd.goto(`http://127.0.0.1:${port}/games/skyline/?seed=7&stage=desert&dummy=idle&tod=0.3`, { timeout: 60000 });
+  await pd.waitForFunction(() => window.__skyline && window.__skyline.ui.name === 'title', null, { timeout: 30000 });
+  await pd.evaluate(() => { const S = window.__skyline; S.startBattle(); S.freeze(true); S.tick(5);
+    const w = S.world, me = w.fighters[0];
+    for (const tw of w.twisters) { tw.phase = 'rest'; tw.dur = 1e6; tw.strength = 0; }
+    Object.assign(w.twisters[0], { phase: 'live', t: 0, dur: 1e6, strength: 1, x: me.pos.x + 30, z: me.pos.z - 60, heading: 0 });
+    S.tick(1); me.pos.x = w.twisters[0].x + 2; me.pos.z = w.twisters[0].z; S.tick(75); });
+  // Free camera looking at the column; give the camera a few frames to catch up after the jump.
+  await pd.keyboard.down('KeyF'); await pd.evaluate(() => window.__skyline.tick(1)); await pd.keyboard.up('KeyF');
+  await pd.evaluate(() => { const S = window.__skyline; S.look.yaw = 0.2; S.look.pitch = 0.05; });
+  await pd.waitForTimeout(2500);
+  await pd.screenshot({ path: path.join(outDir, '17-desert-twister.png') });
+  const st = await pd.evaluate(() => { const f = window.__skyline.world.fighters[0]; return { y: Math.round(f.pos.y), caught: f.caught }; });
+  console.log(`  saved 17-desert-twister.png; player at ${st.y} m, caught ${st.caught}`);
+  if (!st.caught || st.y < 20) errors.push('desert: the twister did not lift the player');
+  await pd.close();
+}
+
 // Postcard views (with bloom): the north ramp and deck from the street, the skyline from above, and the moon.
 for (const [name, q] of [['06-highway', 'pos=0,0,40&look=3.14159,-0.05'], ['07-skyline', 'pos=-60,180,120&look=0.6,-0.55'], ['13-moon', 'stage=moon&pos=0,0,40&look=3.14159,-0.02'], ['14-moon-sky', 'stage=moon&dummy=idle&pos=480,100,480&look=0.25,0.5']]) {
   const p2 = await browser.newPage({ viewport: { width: 1280, height: 720 } });

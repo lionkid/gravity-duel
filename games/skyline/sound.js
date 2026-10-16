@@ -9,6 +9,17 @@ export const RECIPES = {
   boomM: (s, o) => { s.noise('lowpass', 1500, 90, 0.8, 0.8, o); s.tone('sine', 95, 30, 0.65, 0.5, o); },
   slash: (s, o) => { s.noise('bandpass', 700, 2800, 0.18, 0.3, o, 3); s.tone('sawtooth', 190, 90, 0.2, 0.06, o); },
   swingHeavy: (s, o) => { s.noise('bandpass', 260, 1500, 0.32, 0.5, o, 2.5); s.tone('sawtooth', 140, 45, 0.3, 0.12, o); s.tone('sine', 70, 40, 0.25, 0.2, o, 0.05); },
+  // Practice targets: a wooden knock, a bell for the bullseye, a crack when a board breaks.
+  tHit: (s, o) => { s.noise('lowpass', 1800, 400, 0.08, 0.3, o, 1); s.tone('triangle', 420, 300, 0.07, 0.12, o); },
+  tBull: (s, o) => { s.tone('sine', 1320, 1320, 0.5, 0.16, o); s.tone('sine', 1980, 1980, 0.6, 0.1, o, 0.04); s.tone('sine', 2640, 2640, 0.4, 0.05, o, 0.08); },
+  tBreak: (s, o) => { s.noise('bandpass', 2400, 700, 0.22, 0.45, o, 1.4); s.tone('square', 330, 120, 0.14, 0.08, o); s.noise('highpass', 3000, 1500, 0.3, 0.12, o, 1, 0.05); },
+  tUp: (s, o) => { s.tone('sine', 520, 880, 0.12, 0.05, o); },
+  count: (s, o) => { s.tone('square', 880, 880, 0.09, 0.07, o); },
+  countGo: (s, o) => { s.tone('square', 1320, 1320, 0.28, 0.09, o); s.tone('square', 660, 660, 0.28, 0.05, o); },
+  buzzer: (s, o) => { s.tone('sawtooth', 220, 200, 0.7, 0.12, o); s.tone('square', 330, 300, 0.7, 0.06, o); },
+  // Twisters: a rising whoosh when caught, a falling one when thrown out.
+  caught: (s, o) => { s.noise('bandpass', 300, 1800, 0.9, 0.5, o, 1.2); s.tone('sine', 90, 180, 0.8, 0.12, o); },
+  fling: (s, o) => { s.noise('bandpass', 1600, 300, 0.7, 0.45, o, 1.2); },
   dry: (s, o) => { s.tone('square', 1500, 1000, 0.025, 0.07, o); s.noise('highpass', 3000, 2000, 0.03, 0.08, o); },
   lunge: (s, o) => { s.noise('bandpass', 400, 1800, 0.3, 0.3, o, 2); },
   hit: (s, o) => { s.noise('lowpass', 2600, 300, 0.14, 0.35, o); s.tone('square', 190, 70, 0.1, 0.12, o); },
@@ -41,6 +52,12 @@ export function soundForEvent(sfx, e, world, localId = 1) {
     case 'impact': sfx.play(e.look === 'rocketM' ? 'boomM' : 'boomS', at); break;
     case 'slash': sfx.play(e.style === 'overhead' || e.style === 'spin' ? 'swingHeavy' : 'slash', at); break;
     case 'dry': if (e.id === localId) sfx.play('dry', null); break;
+    case 'target': sfx.play(e.broke ? (e.bull ? 'tBull' : 'tBreak') : 'tHit', at); if (e.broke && e.bull) sfx.play('tBreak', at); break;
+    case 'targetUp': sfx.play('tUp', at); break;
+    case 'count': sfx.play(e.n > 0 ? 'count' : 'countGo', null); break;
+    case 'practiceEnd': sfx.play('buzzer', null); break;
+    case 'caught': sfx.play('caught', at); break;
+    case 'fling': case 'escape': sfx.play('fling', at); break;
     case 'melee': if (e.lunge) sfx.play('lunge', fighterPos(e.id)); break;
     case 'hit': sfx.play(e.broke ? 'broke' : e.guard ? 'guard' : e.amount >= 120 || e.final ? 'hitHeavy' : 'hit', at); break;
     case 'jump': sfx.play('jump', fighterPos(e.id)); break;
@@ -53,6 +70,13 @@ export function soundForEvent(sfx, e, world, localId = 1) {
     case 'fence': sfx.play('fence', fighterPos(e.id)); break;
     case 'ko': sfx.play('ko', fighterPos(e.id)); break;
     default: break;
+  }
+}
+
+// Each twister roars where it stands, louder as it grows; quiet when the match is not running.
+export function updateTwisterLoops(sfx, world, active) {
+  for (const tw of world.twisters || []) {
+    sfx.setLoop(`twister${tw.id}`, active ? tw.strength : 0, { x: tw.x, y: 20, z: tw.z }, { freq: 260, q: 0.5, gain: 0.5 });
   }
 }
 

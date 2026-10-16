@@ -24,13 +24,14 @@ export function defineScreens(ui, ctx) {
       <p class="sub">重力決定彈道的機甲一對一。城市街道、高架道路、大樓屋頂，從傍晚打到天黑。</p>
       <div class="menu">
         ${btn('solo', '單人對戰', { cls: 'primary' })}
+        ${btn('practice', '練習模式 <small>打鏢靶、試武器、練連段</small>')}
         ${btn('lan', `區域網路對戰 <small>${ctx.lan.server ? '同一個網路的兩台電腦' : '需要 Gravity Duel 伺服器（npm run dev 或桌面版）'}</small>`, { attrs: ctx.lan.server ? '' : 'disabled' })}
         ${btn('help', '操作說明')}
         ${btn('settings', '設定')}
       </div>
       ${note(ctx.note)}
       <p class="foot">v${esc(ctx.version)} · 滑鼠靈敏度與音量在「設定」</p>`),
-    actions: { solo: open('cpu'), lan: () => { ctx.sfx.play('menuOk'); ctx.lanBrowse(); ui.show('lan'); }, help: open('help'), settings: open('settings') },
+    actions: { solo: open('cpu'), practice: open('practice'), lan: () => { ctx.sfx.play('menuOk'); ctx.lanBrowse(); ui.show('lan'); }, help: open('help'), settings: open('settings') },
   }));
 
   ui.define('cpu', () => ({
@@ -67,6 +68,70 @@ export function defineScreens(ui, ctx) {
       escape: () => { if (ui.depth <= 1) { ctx.sfx.play('menuBack'); ctx.quit(); } else back(); },
     },
   }));
+
+  // ---- Practice: the setup screen and the time attack's result.
+  ui.define('practice', () => {
+    const P = CFG.PRACTICE, st = ctx.settings;
+    const best = ctx.practiceBest(ctx.stageId);
+    const bestLine = st.practiceMode === 'timed'
+      ? (best ? `這個場景的最佳紀錄：<b>${best.score}</b> 分（${esc(loadoutText(best))}）` : '這個場景還沒有紀錄。')
+      : '自由練習沒有時間限制；選單裡隨時可以重新開始。';
+    return {
+      html: panel('', `${logo()}
+        <h2>練習模式</h2>
+        <div class="picker">
+          ${pickerRow('weapon', CFG.WEAPON_CLASSES, '武裝', ctx.loadout.weapon)}
+          ${pickerRow('armor', CFG.ARMORS, '裝甲', ctx.loadout.armor)}
+          ${pickerRow('stage', CFG.STAGES, '場景', ctx.stageId)}
+          ${pickerRow('pmode', P.modes, '模式', st.practiceMode)}
+          ${pickerRow('pdummy', P.dummies, '假人', st.practiceDummy)}
+        </div>
+        <p class="pickdesc">${esc(CFG.WEAPON_CLASSES[ctx.loadout.weapon].desc)}。${esc(CFG.STAGES[ctx.stageId].desc)}。<br>${esc(P.modes[st.practiceMode].desc)}；${esc(P.dummies[st.practiceDummy].desc)}。</p>
+        <p class="cpu">${bestLine}</p>
+        <ul class="rules small">
+          <li>鏢靶分五圈，靶心 10 分、往外 8／6／4／2 分；屋頂靶 ×1.5、移動靶 ×2、浮空靶 ×2.5，用刀砍掉 6 分起。</li>
+          <li>靶子會轉向你；打掉 ${P.respawn} 秒後重生。假人不會還手，倒下 ${P.dummyRevive} 秒後站起來。</li>
+        </ul>
+        <div class="row-end">${btn('back', '返回')}${btn('start', '開始練習', { cls: 'primary' })}</div>`),
+      actions: {
+        opt: (d) => {
+          if (d.kind === 'stage') ctx.setStage(d.id);
+          else if (d.kind === 'pmode') st.practiceMode = d.id;
+          else if (d.kind === 'pdummy') st.practiceDummy = d.id;
+          else ctx.loadout[d.kind] = d.id;
+          ctx.saveSettings(); ctx.sfx.play('menuMove'); ui.refresh();
+        },
+        start: () => { ctx.sfx.play('start'); ctx.startPractice(); },
+        back: () => { ctx.sfx.play('menuBack'); if (ui.depth <= 1) ctx.quit(); else ui.back(); },
+        escape: () => { ctx.sfx.play('menuBack'); if (ui.depth <= 1) ctx.quit(); else ui.back(); },
+      },
+    };
+  });
+
+  ui.define('presult', (d) => {
+    const acc = d.shots ? Math.round(d.hits / d.shots * 100) : 0;
+    return {
+      html: panel('narrow', `<h2 class="big ${d.newBest ? 'win' : ''}">${d.score}<small>分</small></h2>
+        <p class="sub">${d.newBest ? '新紀錄！' : `最佳紀錄 ${d.best} 分`} · ${esc(d.stage)} · ${esc(d.loadout)}</p>
+        <dl class="stats">
+          <dt>擊破</dt><dd>${d.breaks}</dd>
+          <dt>靶心</dt><dd>${d.bulls}</dd>
+          <dt>命中率</dt><dd>${acc}%（${d.hits}/${d.shots}）</dd>
+          <dt>假人傷害</dt><dd>${d.dummyDamage}</dd>
+        </dl>
+        <div class="menu">
+          ${btn('again', '再挑戰 <small>R</small>', { cls: 'primary' })}
+          ${btn('setup', '換配置')}
+          ${btn('quit', '回到標題')}
+        </div>`),
+      actions: {
+        again: () => { ctx.sfx.play('start'); ctx.startPractice(); },
+        setup: () => { ctx.sfx.play('menuOk'); ctx.practiceSetup(); },
+        quit: () => { ctx.sfx.play('menuBack'); ctx.quit(); },
+      },
+      keys: { KeyR: 'again' },
+    };
+  });
 
   // ---- LAN: the room browser. This server's room first, then rooms heard on the network.
   ui.define('lan', () => {
@@ -178,13 +243,14 @@ export function defineScreens(ui, ctx) {
   }));
 
   ui.define('pause', () => {
-    const lan = ctx.isLan();
+    const lan = ctx.isLan(), practice = ctx.isPractice();
     return {
       html: panel('narrow', `<h2 class="big">${lan ? '選單' : '暫停'}</h2>
-        ${lan ? '<p class="sub">區網對戰不會暫停，對手還在打。</p>' : ''}
+        ${lan ? '<p class="sub">區網對戰不會暫停，對手還在打。</p>' : practice ? '<p class="sub">練習模式</p>' : ''}
         <div class="menu">
           ${btn('resume', '繼續 <small>Esc</small>', { cls: 'primary' })}
           ${lan ? '' : btn('restart', '重新開始')}
+          ${practice ? btn('setup', '換配置') : ''}
           ${btn('settings', '設定')}
           ${btn('help', '操作說明')}
           ${lan ? btn('quit', '離開房間') : btn('quit', '回到標題')}
@@ -193,7 +259,8 @@ export function defineScreens(ui, ctx) {
       actions: {
         resume: () => { ctx.sfx.play('menuOk'); ctx.resume(); },
         escape: () => { ctx.sfx.play('menuOk'); ctx.resume(); },
-        restart: () => { ctx.sfx.play('start'); ctx.startBattle(); },
+        restart: () => { ctx.sfx.play('start'); if (practice) ctx.startPractice(); else ctx.startBattle(); },
+        setup: () => { ctx.sfx.play('menuOk'); ctx.practiceSetup(); },
         settings: open('settings'),
         help: open('help'),
         quit: () => { ctx.sfx.play('menuBack'); if (lan) ctx.lanLeave(); ctx.quit(); },
@@ -232,6 +299,8 @@ export function defineScreens(ui, ctx) {
         <li>對手的血條只在看得到它時顯示；躲進建築之間，對手就得來找你，而你也看不到它。</li>
         <li>防遠程裝甲怕近戰、防近戰裝甲怕火神砲；標準裝甲沒有弱點，而且最快。</li>
         <li>區域網路對戰：兩台電腦都打開 Gravity Duel（桌面版，或 npm run dev），一台建立房間、另一台加入。</li>
+        <li>練習模式：場景裡擺滿鏢靶（地面、屋頂、移動、浮空），靶心分數最高；60 秒挑戰會保存每個場景的紀錄。</li>
+        <li>沙漠遺跡：沙塵龍捲風會把靠近的機體吸過去、捲上高空再甩出來；被捲住時按衝刺可以脫身，穿過龍捲風的子彈會被吹偏。</li>
       </ul>
       <div class="row-end">${btn('back', '返回')}</div>`),
     actions: { back, escape: back },

@@ -33,6 +33,57 @@ export const THEMES = {
   },
 };
 
+// The desert: a hazy afternoon that turns to an orange sunset and a violet night, adobe walls with
+// small dark openings (a few lamps behind them after dark), layered sandstone mesas and boulders,
+// rippled sand, dunes beyond the fence and the sun as a disc in the sky.
+const DESERT_PHASES = [
+  { t: 0, sky: [0x5f9bd8, 0xf2ddb0, 0xc89c68], sun: { color: 0xfff1d6, intensity: 3.0, dir: [-0.35, 0.86, 0.36] }, hemi: { sky: 0xffe7c4, ground: 0xb4865a, intensity: 1.15 }, fog: 0xe6cfa2, fogDensity: 0.00085, stars: 0, night: 0, envDay: 1 },
+  { t: 0.5, sky: [0x4b4f8e, 0xff9448, 0x8c5034], sun: { color: 0xffa057, intensity: 2.3, dir: [-0.92, 0.17, 0.35] }, hemi: { sky: 0xc78f74, ground: 0x5c3b28, intensity: 1.0 }, fog: 0xd08a58, fogDensity: 0.00105, stars: 0.2, night: 0.42, envDay: 0.5 },
+  { t: 1, sky: [0x0b0d24, 0x3c2c4e, 0x0b0907], sun: { color: 0xb6bcff, intensity: 1.7, dir: [0.45, 0.72, -0.4] }, hemi: { sky: 0x6c72a6, ground: 0x221a12, intensity: 1.35 }, fog: 0x1d1622, fogDensity: 0.0009, stars: 1, night: 1, envDay: 0 },
+];
+THEMES.desert = {
+  palette: Object.assign({}, DEFAULT_PALETTE, { ground: 0xc9a46e, road: 0xbe9765, lane: 0xbe9765, kerb: 0xa98258, concrete: 0xb48a5e, rail: 0x9a8a78, rock: 0xa8704a, mesa: 0xb27449,
+    lamp: 0xffd8a0, fence: 0xffc27a, fenceOpacity: 0.03, dune: 0xd2ae78, buildings: [0xc9a27a, 0xb98f66, 0xd5b68e, 0xa97f5a, 0xc39672] }),
+  phases: DESERT_PHASES,
+  windows: 'adobe', roadLines: false, strata: true, ripples: true, dunes: 44, sunDisc: true,
+};
+
+// World position and normal for a material's fragment code (instanced or not), plus a hook for the
+// fragment: `code` runs after the colour is known, with vWPos and vWNormal available.
+function worldShade(mat, key, code, { uniforms = null } = {}) {
+  mat.customProgramCacheKey = () => key;
+  mat.onBeforeCompile = (shader) => {
+    if (uniforms) Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vWNormal;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        #ifdef USE_INSTANCING
+          vWPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
+          vWNormal = normalize(mat3(modelMatrix) * mat3(instanceMatrix) * normal);
+        #else
+          vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
+          vWNormal = normalize(mat3(modelMatrix) * normal);
+        #endif`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>\nvarying vec3 vWPos;\nvarying vec3 vWNormal;\n${uniforms ? Object.keys(uniforms).map((u) => `uniform float ${u};`).join('\n') : ''}`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n{ ${code} }`);
+  };
+  return mat;
+}
+// Sandstone: bands of strata, darker in the creases, bleached on top.
+const STRATA = `
+  float band = sin(vWPos.y * 0.55 + sin(vWPos.x * 0.031 + vWPos.z * 0.023) * 2.2);
+  float ledge = step(0.72, fract(vWPos.y * 0.085 + 0.13 * sin(vWPos.x * 0.05)));
+  diffuseColor.rgb *= 0.86 + 0.09 * band - 0.08 * ledge;
+  if (vWNormal.y > 0.5) diffuseColor.rgb *= 1.14;`;
+// Wind ripples in the sand, faded out where they would shimmer.
+const RIPPLES = `
+  vec2 q = vWPos.xz;
+  float aa = clamp(1.0 - length(fwidth(q)) * 0.22, 0.0, 1.0);
+  float rip = sin(dot(q, vec2(0.21, 0.13)) + sin(q.x * 0.011) * 3.0 + sin(q.y * 0.017) * 2.0);
+  float rip2 = sin(dot(q, vec2(-0.08, 0.31)) * 1.7 + sin(q.x * 0.004) * 4.0);
+  diffuseColor.rgb *= 1.0 + (0.05 * rip + 0.025 * rip2) * aa;`;
+
 function gradientEnvironment(renderer, stops) {
   const c = document.createElement('canvas');
   c.width = 64; c.height = 32;
@@ -83,11 +134,14 @@ export function buildStageVisual(scene, stage, options = {}) {
 
   // Ground.
   const extent = Math.max(b.maxX - b.minX, b.maxZ - b.minZ) * 3;
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(extent, extent), new THREE.MeshStandardMaterial({ color: pal.ground, roughness: 0.95, metalness: 0 }));
+  const groundMat = new THREE.MeshStandardMaterial({ color: pal.ground, roughness: 0.95, metalness: 0 });
+  if (theme.ripples) worldShade(groundMat, 'sand-ground', RIPPLES);
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(extent, extent), groundMat);
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = groundY;
   group.add(ground);
   if (theme.craters) group.add(buildCraters(stage, theme.craters, pal, groundY));
+  if (theme.dunes) group.add(buildDunes(stage, theme.dunes, pal, groundY));
 
   // Roads: lighter strips with a pale line along each edge.
   const roads = (stage.visual && stage.visual.roads) || [];
@@ -104,17 +158,19 @@ export function buildStageVisual(scene, stage, options = {}) {
       if (w >= d) lines.push(r.x0, y, r.z0 + inset, r.x1, y, r.z0 + inset, r.x0, y, r.z1 - inset, r.x1, y, r.z1 - inset);
       else lines.push(r.x0 + inset, y, r.z0, r.x0 + inset, y, r.z1, r.x1 - inset, y, r.z0, r.x1 - inset, y, r.z1);
     }
-    const lg = new THREE.BufferGeometry();
-    lg.setAttribute('position', new THREE.Float32BufferAttribute(lines, 3));
-    group.add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: pal.lane, transparent: true, opacity: 0.55 })));
+    if (theme.roadLines !== false) {
+      const lg = new THREE.BufferGeometry();
+      lg.setAttribute('position', new THREE.Float32BufferAttribute(lines, 3));
+      group.add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: pal.lane, transparent: true, opacity: 0.55 })));
+    }
   }
 
   // Static boxes by tag.
   const byTag = {};
   for (const s of stage.statics) (byTag[s.tag || 'building'] = byTag[s.tag || 'building'] || []).push(s);
-  const buildings = byTag.building ? buildBuildings(byTag.building, pal) : null;
+  const buildings = byTag.building ? buildBuildings(byTag.building, pal, theme.windows === 'adobe' ? 1 : 0) : null;
   if (buildings) group.add(buildings.mesh);
-  for (const tag of ['deck', 'kerb', 'rail', 'pillar', 'prop', 'rock']) if (byTag[tag]) group.add(buildPlainBoxes(byTag[tag], tag, pal));
+  for (const tag of ['deck', 'kerb', 'rail', 'pillar', 'prop', 'rock', 'mesa']) if (byTag[tag]) group.add(buildPlainBoxes(byTag[tag], tag, pal, { strata: tag === 'mesa' || (tag === 'rock' && theme.strata) }));
   for (const r of stage.ramps || []) group.add(buildRamp(r, pal));
   const vis = stage.visual || {};
   const lamps = vis.lamps && vis.lamps.length ? buildLamps(vis.lamps, pal) : null;
@@ -137,7 +193,7 @@ export function buildStageVisual(scene, stage, options = {}) {
   const envs = options.environments || null;
   const ca = new THREE.Color(), cb = new THREE.Color();
   const lerpColor = (a, b2, k) => ca.setHex(a).lerp(cb.setHex(b2), k);
-  const phase = { sky: { top: new THREE.Color(), horizon: new THREE.Color(), bottom: new THREE.Color() }, stars: 1, night: 1 };
+  const phase = { sky: { top: new THREE.Color(), horizon: new THREE.Color(), bottom: new THREE.Color() }, stars: 1, night: 1, sunDir: [0, 1, 0], sunColor: new THREE.Color(), fog: new THREE.Color() };
   function setTimeOfDay(t) {
     t = Math.max(0, Math.min(1, t));
     const [p, q] = t < 0.5 ? [PH[0], PH[1]] : [PH[1], PH[2]];
@@ -154,6 +210,9 @@ export function buildStageVisual(scene, stage, options = {}) {
     sun.color.copy(lerpColor(p.sun.color, q.sun.color, k));
     sun.intensity = num(p.sun.intensity, q.sun.intensity);
     sun.position.set(num(p.sun.dir[0], q.sun.dir[0]), num(p.sun.dir[1], q.sun.dir[1]), num(p.sun.dir[2], q.sun.dir[2])).normalize().multiplyScalar(600);
+    phase.sunDir = [sun.position.x / 600, sun.position.y / 600, sun.position.z / 600];
+    phase.sunColor.copy(sun.color);
+    phase.fog.copy(scene.fog.color);
     hemi.color.copy(lerpColor(p.hemi.sky, q.hemi.sky, k));
     hemi.groundColor.copy(lerpColor(p.hemi.ground, q.hemi.ground, k));
     hemi.intensity = num(p.hemi.intensity, q.hemi.intensity);
@@ -170,7 +229,7 @@ export function buildStageVisual(scene, stage, options = {}) {
 
   return {
     group, setTimeOfDay, phase,
-    theme: { id: options.theme || stage.theme || 'city', earth: theme.earth || null },
+    theme: { id: options.theme || stage.theme || 'city', earth: theme.earth || null, sun: !!theme.sunDisc },
     dispose() {
       scene.remove(group);
       group.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material && o.material.dispose) o.material.dispose(); });
@@ -250,9 +309,29 @@ function buildCraters(stage, count, pal, groundY) {
   return g;
 }
 
-function buildPlainBoxes(list, tag, pal) {
-  const color = tag === 'rail' ? pal.rail : tag === 'kerb' ? pal.kerb : tag === 'rock' ? (pal.rock || pal.concrete) : pal.concrete;
-  const mat = new THREE.MeshStandardMaterial({ color, roughness: tag === 'rock' ? 1 : 0.8, metalness: tag === 'rail' ? 0.6 : 0.05 });
+// Dunes: long low mounds of sand in a ring beyond the fence (scenery: nobody walks there).
+function buildDunes(stage, count, pal, groundY) {
+  const rnd = makeRng((stage.seed || 1) * 13 + 7);
+  const b = stage.bounds, half = Math.min(b.maxX, b.maxZ);
+  const mat = worldShade(new THREE.MeshStandardMaterial({ color: pal.dune || pal.ground, roughness: 0.95, metalness: 0 }), 'sand-dune', RIPPLES);
+  const mesh = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 28, 12), mat, count);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), pos = new THREE.Vector3(), sc = new THREE.Vector3();
+  for (let i = 0; i < count; i++) {
+    const a = rnd.range(0, Math.PI * 2), r = half * rnd.range(1.12, 2.1);
+    const sy = rnd.range(14, 55);
+    pos.set(Math.cos(a) * r, groundY - sy * 0.35, Math.sin(a) * r);
+    sc.set(rnd.range(80, 230), sy, rnd.range(60, 170));
+    q.setFromEuler(e.set(0, a + rnd.range(-0.6, 0.6), 0));
+    mesh.setMatrixAt(i, m.compose(pos, q, sc));
+  }
+  mesh.name = 'dunes';
+  return mesh;
+}
+
+function buildPlainBoxes(list, tag, pal, { strata = false } = {}) {
+  const color = tag === 'rail' ? pal.rail : tag === 'kerb' ? pal.kerb : tag === 'rock' ? (pal.rock || pal.concrete) : tag === 'mesa' ? (pal.mesa || pal.rock || pal.concrete) : pal.concrete;
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: tag === 'rock' || tag === 'mesa' ? 1 : 0.8, metalness: tag === 'rail' ? 0.6 : 0.05 });
+  if (strata) worldShade(mat, `strata-${tag}`, STRATA);
   const geo = new THREE.BoxGeometry(1, 1, 1);
   const mesh = new THREE.InstancedMesh(geo, mat, list.length);
   const m = new THREE.Matrix4();
@@ -265,35 +344,8 @@ function buildPlainBoxes(list, tag, pal) {
   return mesh;
 }
 
-function buildBuildings(list, pal) {
-  const geo = new THREE.BoxGeometry(1, 1, 1);
-  const seeds = new Float32Array(list.length);
-  geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seeds, 1));
-  const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55, metalness: 0.25 });
-  const uniforms = { uNight: { value: 1 } };
-  mat.customProgramCacheKey = () => 'city-windows';
-  mat.onBeforeCompile = (shader) => {
-    shader.uniforms.uNight = uniforms.uNight;
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aSeed;\nvarying float vSeed;\nvarying vec3 vWPos;\nvarying vec3 vWNormal;')
-      .replace('#include <begin_vertex>', `#include <begin_vertex>
-        #ifdef USE_INSTANCING
-          vec4 cityWPos = modelMatrix * instanceMatrix * vec4(transformed, 1.0);
-          vWNormal = normalize(mat3(modelMatrix) * mat3(instanceMatrix) * normal);
-        #else
-          vec4 cityWPos = modelMatrix * vec4(transformed, 1.0);
-          vWNormal = normalize(mat3(modelMatrix) * normal);
-        #endif
-        vWPos = cityWPos.xyz;
-        vSeed = aSeed;`);
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>
-        uniform float uNight;
-        varying float vSeed;
-        varying vec3 vWPos;
-        varying vec3 vWNormal;
-        float cityHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7)) + vSeed * 17.31) * 43758.5453); }`)
-      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+// Fragment code for the building walls (see buildBuildings).
+const CITY_WALLS = `
         {
           vec3 an = abs(vWNormal);
           if (an.y < 0.5) {
@@ -321,7 +373,66 @@ function buildBuildings(list, pal) {
           } else {
             diffuseColor.rgb *= 0.8;
           }
-        }`);
+        }`;
+// Adobe: mud courses, small square openings on some cells (dark by day, a few lamp-lit at dusk),
+// flat sun-bleached roofs.
+const ADOBE_WALLS = `
+        {
+          vec3 an = abs(vWNormal);
+          if (an.y < 0.5) {
+            vec2 uv = an.x > an.z ? vec2(vWPos.z, vWPos.y) : vec2(vWPos.x, vWPos.y);
+            vec2 cuv = uv / vec2(6.0, 5.0);
+            vec2 cell = floor(cuv);
+            vec2 f = fract(cuv);
+            vec2 fw = fwidth(cuv);
+            float h = cityHash(cell);
+            float hole = step(0.5, h)
+              * smoothstep(0.32 - fw.x, 0.32 + fw.x, f.x) * (1.0 - smoothstep(0.64 - fw.x, 0.64 + fw.x, f.x))
+              * smoothstep(0.34 - fw.y, 0.34 + fw.y, f.y) * (1.0 - smoothstep(0.74 - fw.y, 0.74 + fw.y, f.y));
+            float far = smoothstep(0.08, 0.3, max(fw.x, fw.y));        // openings smaller than a few pixels fade out
+            hole *= 1.0 - far;
+            float course = 0.95 + 0.05 * sin(vWPos.y * 1.9 + cityHash(vec2(cell.x, 3.0)) * 6.0);
+            diffuseColor.rgb *= course * (1.0 - hole * 0.78);
+            float lit = step(0.84, h) * smoothstep(0.3, 0.8, uNight);
+            totalEmissiveRadiance += vec3(1.0, 0.6, 0.28) * hole * lit * 0.9 + vec3(1.0, 0.6, 0.28) * far * 0.04 * uNight;
+          } else {
+            diffuseColor.rgb *= 1.06;
+          }
+        }`;
+
+// style 0: glass towers with a grid of windows; 1: adobe walls with small dark openings.
+function buildBuildings(list, pal, style = 0) {
+  const geo = new THREE.BoxGeometry(1, 1, 1);
+  const seeds = new Float32Array(list.length);
+  geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seeds, 1));
+  const mat = style ? new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, metalness: 0 }) : new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55, metalness: 0.25 });
+  const uniforms = { uNight: { value: 1 } };
+  mat.customProgramCacheKey = () => (style ? 'adobe-walls' : 'city-windows');
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uNight = uniforms.uNight;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aSeed;\nvarying float vSeed;\nvarying vec3 vWPos;\nvarying vec3 vWNormal;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        #ifdef USE_INSTANCING
+          vec4 cityWPos = modelMatrix * instanceMatrix * vec4(transformed, 1.0);
+          vWNormal = normalize(mat3(modelMatrix) * mat3(instanceMatrix) * normal);
+        #else
+          vec4 cityWPos = modelMatrix * vec4(transformed, 1.0);
+          vWNormal = normalize(mat3(modelMatrix) * normal);
+        #endif
+        vWPos = cityWPos.xyz;
+        vSeed = aSeed;`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        uniform float uNight;
+        varying float vSeed;
+        varying vec3 vWPos;
+        varying vec3 vWNormal;
+        // The seed is whole per building, but arrives interpolated: round it, or the hash turns tiny
+        // differences across a wall into speckle.
+        float cityHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7)) + floor(vSeed + 0.5) * 17.31) * 43758.5453); }`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+${style ? ADOBE_WALLS : CITY_WALLS}`);
   };
   const mesh = new THREE.InstancedMesh(geo, mat, list.length);
   const m = new THREE.Matrix4();

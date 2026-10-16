@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { createLoop } from '../../engine/core/loop.js';
 import { drain } from '../../engine/core/events.js';
-import { lerpAngle, dirToAim, distXZ, angleDiff } from '../../engine/core/math.js';
+import { lerpAngle, dirToAim, distXZ, angleDiff, clamp } from '../../engine/core/math.js';
 import { createKeyboard } from '../../engine/input/keyboard.js';
 import { createMouse } from '../../engine/input/mouse.js';
 import { createMapper } from '../../engine/input/bindings.js';
@@ -21,6 +21,8 @@ import { createBar, el, project } from '../../engine/render/hud.js';
 import { createSky } from '../../engine/render/sky.js';
 import { createBlobShadow, createSparks, createSlashes, createProjectileView, createFlashes, createBladeTrail, createRings, createTracers } from '../../engine/render/fx.js';
 import { createPost } from '../../engine/render/post.js';
+import { createTargetView } from '../../engine/render/targets.js';
+import { createTwisterView } from '../../engine/render/twister.js';
 import { createSynth } from '../../engine/audio/synth.js';
 import { createScreens } from '../../engine/ui/screens.js';
 import { createSocket } from '../../engine/net/socket.js';
@@ -31,7 +33,7 @@ import { createWorld, stepWorld, cloneWorld, serializeWorld, applySnapshot, hash
 import { weaponIn, meleeOf, rangedOf } from './rules/combat.js';
 import { AX01, withPalette } from './mechs/ax01.js';
 import { createAI, aiIntent, AI_LEVELS } from './ai/brain.js';
-import { RECIPES, soundForEvent, updateThrusterLoops } from './sound.js';
+import { RECIPES, soundForEvent, updateThrusterLoops, updateTwisterLoops } from './sound.js';
 import { defineScreens } from './screens.js';
 import { createLobby } from './lobby.js';
 
@@ -42,7 +44,10 @@ const load = (key, fallback) => { try { return Object.assign(fallback, JSON.pars
 const save = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* private mode */ } };
 
 // Settings and the player's loadout live in this browser; the URL can override them (?weapon=&armor=&cpu=).
-const settings = load('skyline.settings', { sens: 1, volume: 0.5, bloom: true, quality: '', invertY: false, fps: false, touch: 'auto', cpu: 'normal', stage: 'city' });
+const settings = load('skyline.settings', { sens: 1, volume: 0.5, bloom: true, quality: '', invertY: false, fps: false, touch: 'auto', cpu: 'normal', stage: 'city', practiceMode: 'free', practiceDummy: 'stand' });
+if (!CFG.PRACTICE.modes[settings.practiceMode]) settings.practiceMode = 'free';
+if (!CFG.PRACTICE.dummies[settings.practiceDummy]) settings.practiceDummy = 'stand';
+const practiceBest = load('skyline.practiceBest', {});          // stage id → { score, weapon, armor }
 if (!CFG.QUALITY[settings.quality]) settings.quality = settings.bloom === false ? 'low' : 'medium';   // older saves only knew bloom on/off
 if (!['auto', 'on', 'off'].includes(settings.touch)) settings.touch = 'auto';
 settings.cpu = pick(AI_LEVELS, params.get('cpu') || settings.cpu, 'normal');
@@ -86,6 +91,9 @@ const rings = createRings(app.scene);
 const tracers = createTracers(app.scene, { life: 0.1 });
 const bolts = createProjectileView(app.scene, { smoke, sparks });
 const trails = mechs.map((m) => createBladeTrail(app.scene, { color: m.design.palette.glow }));
+const boards = createTargetView(app.scene);
+const twisterView = createTwisterView(app.scene, { height: CFG.TWISTER.height });
+const RING_FX = [0xffd040, 0xff5a50, 0x5a9bff, 0xc8ccd6, 0xffffff];   // spark colours by ring, bullseye first
 const shake = createShake();
 // Warm up every material once so the first shot, flash, ring or trail does not stall on shader
 // compilation: the effect pools start hidden, and compile() only sees visible objects.
@@ -158,19 +166,28 @@ const ko = el('div', 'ko', hud);
 const koResult = el('div', 'result', ko);
 const debug = el('div', 'debug', hud);
 const netBox = el('div', 'net', hud);
-const dmgNums = Array.from({ length: 12 }, () => el('div', 'dmgnum', hud));
+// Practice: the score panel, the clock, the big countdown, markers over the targets and a hint line.
+const pBox = el('div', 'practice', hud);
+const pTimer = el('div', 'ptimer', hud);
+const pCount = el('div', 'pcount', hud);
+const pHint = el('div', 'phint', hud);
+const tMarks = Array.from({ length: 24 }, () => { const m = el('div', 'tmark', hud); el('span', '', m, ''); return m; });
+const dmgNums = Array.from({ length: 14 }, () => el('div', 'dmgnum', hud));
 let dmgNext = 0;
-function showDamage(x, y, amount, heavy, mine) {
+function showPopup(x, y, text, cls = '') {
   const d = dmgNums[dmgNext]; dmgNext = (dmgNext + 1) % dmgNums.length;
-  d.textContent = String(amount);
-  d.className = `dmgnum${heavy ? ' heavy' : ''}${mine ? ' me' : ''}`;
+  d.textContent = text;
+  d.className = `dmgnum ${cls}`;
   d.style.left = `${(x + (Math.random() - 0.5) * 30).toFixed(0)}px`;
   d.style.top = `${(y + (Math.random() - 0.5) * 16).toFixed(0)}px`;
   void d.offsetWidth;                                   // restart the animation
   d.classList.add('on');
 }
+const showDamage = (x, y, amount, heavy, mine) => showPopup(x, y, String(amount), `${heavy ? 'heavy' : ''} ${mine ? 'me' : ''}`);
 let showDebug = params.has('debug');
-let hitmarkT = 0, vignetteT = 0, msgT = 0, sflashT = 0, denyT = 0;
+let hitmarkT = 0, vignetteT = 0, msgT = 0, sflashT = 0, denyT = 0, countT = 0, hintT = 0, practiceEndT = 0, twWarnT = 0;
+let lastPracticeText = '', lastTimerText = '';
+let lastResult = null;                       // the last time attack, for the result screen
 const showMsg = (text, t = 1.2) => { msg.textContent = text; msg.classList.add('on'); msgT = t; };
 
 // ---------------------------------------------------------------- battle state
@@ -180,6 +197,7 @@ let inBattle = false, playing = false, koT = 0, pauseGraceT = 0, attractT = 0;
 // or 'guest' (seat 2: predicts ahead of the host's confirmed ticks). mySeat is the fighter I control.
 let session = { kind: 'local', sync: null };
 let mySeat = 1;
+let practice = null;                         // { mode, dummy } while a practice session runs
 let lastView = null;                         // the guest's previously rendered predicted world
 const hostHashes = new Map();                // host, ?debug only: tick → state hash, for the LAN smoke test
 // Switches the arena (solo: the player's pick; LAN: the host's). The scene is rebuilt in place.
@@ -196,8 +214,8 @@ function setStage(id, { fromPeer = false } = {}) {
   if (!fromPeer) lobby.setStage(id);
 }
 // A fresh world with both mechs at their spawns; also what stands behind the title screen.
-function setupWorld({ matchSeed = seed, loadouts = { 1: loadout, 2: cpuLoadout } } = {}) {
-  world = createWorld({ stage, seed: matchSeed, loadouts });
+function setupWorld({ matchSeed = seed, loadouts = practice ? { 1: loadout, 2: { weapon: 'normal', armor: 'normal' } } : { 1: loadout, 2: cpuLoadout } } = {}) {
+  world = createWorld({ stage, seed: matchSeed, loadouts, practice });
   me = world.fighters[mySeat - 1]; enemy = world.fighters[2 - mySeat];
   ai = createAI(settings.cpu, seed * 7 + 3);
   lastView = null;
@@ -213,14 +231,16 @@ function setupWorld({ matchSeed = seed, loadouts = { 1: loadout, 2: cpuLoadout }
     m.flash = 0;
     m.materials.glow.emissiveIntensity = 2.2;
   });
-  for (const fx of [sparks, smoke, debris, flashes, slashes, rings, tracers, bolts, ...trails]) fx.clear();
+  for (const fx of [sparks, smoke, debris, flashes, slashes, rings, tracers, bolts, boards, twisterView, ...trails]) fx.clear();
+  countT = 0; practiceEndT = 0; twWarnT = 0; pCount.textContent = ''; pTimer.classList.remove('urgent');
   for (const fx of mechFx) { fx.hitT = Infinity; fx.firedT = Infinity; }
   hitstopT = 0; koT = 0;
   lastSeen = null;
   ko.classList.remove('on');
   meName.textContent = mySeat === 1 ? 'AX-01 VANGUARD' : 'AX-01 VANGUARD · CRIMSON';
   meLoadout.textContent = loadoutText(me.loadout);
-  enemyName.textContent = session.kind === 'local' ? `對手 · ${loadoutText(enemy.loadout)} · ${AI_LEVELS[settings.cpu].zh}` : `對手 · ${loadoutText(enemy.loadout)} · 區網`;
+  enemyName.textContent = practice ? '練習假人' : session.kind === 'local' ? `對手 · ${loadoutText(enemy.loadout)} · ${AI_LEVELS[settings.cpu].zh}` : `對手 · ${loadoutText(enemy.loadout)} · 區網`;
+  document.body.classList.toggle('practicing', !!practice);
   slotEls.forEach((s, i) => { s.querySelector('.wname').textContent = weaponIn(me, CFG.SLOTS[i]).zh; });
   tpRig.reset(); lockRig.reset();
   cam.use(tpRig);
@@ -254,6 +274,23 @@ function dummyStep(dt) {
   return dummyIntent;
 }
 
+// The practice dummy: stands still, or strafes along its street with a hop now and then. Never attacks.
+const practiceDummy = createIntent();
+function practiceDummyIntent() {
+  clearIntent(practiceDummy);
+  const d = world.fighters[1];
+  if (!practice || practice.dummy !== 'move' || !d || d.dead) return practiceDummy;
+  const t = world.time, sp = stage.spawns[1].pos;
+  const tx = sp.x + Math.sin(t * 0.55) * 16, tz = sp.z + Math.sin(t * 0.21) * 12;
+  practiceDummy.move.x = clamp((tx - d.pos.x) / 6, -1, 1);
+  practiceDummy.move.z = clamp((tz - d.pos.z) / 6, -1, 1);
+  const k = world.tick % 330;
+  if (k === 0) practiceDummy.pressed.boost = true;
+  if (k < 40) practiceDummy.held.boost = true;
+  if (world.tick % 470 === 200) practiceDummy.pressed.dash = true;
+  return practiceDummy;
+}
+
 // ---------------------------------------------------------------- menus, pause and KO
 // `inBattle`: a match is on (or just ended); `playing`: the player's input drives it and the mouse is
 // captured. Pausing releases the mouse and shows the pause screen; closing it captures the mouse again.
@@ -267,8 +304,22 @@ function setPlaying(on) {
 function startBattle() {
   session = { kind: 'local', sync: null };
   mySeat = 1;
+  practice = null;
   setupWorld();
   beginBattle();
+}
+// Practice: targets everywhere, a dummy in seat 2, a score; free, or a time attack.
+function startPractice() {
+  session = { kind: 'local', sync: null };
+  mySeat = 1;
+  practice = { mode: settings.practiceMode, dummy: settings.practiceDummy };
+  setupWorld();
+  beginBattle();
+  hintT = 8;
+  pHint.textContent = practice.mode === 'timed'
+    ? '60 秒內盡量拿分：打中靶心分數最高，移動靶、浮空靶分數加倍 · Esc 選單'
+    : '右鍵瞄準射擊鏢靶，靶心 10 分 · F 解除鎖定後火神砲朝身體正面射 · 假人可以練連段 · Esc 選單';
+  if (practice.mode === 'timed') sfx.play('count');
 }
 // LAN: both browsers build the same world from the host's seed and loadouts; seat 1 runs it.
 function startLan({ seed: matchSeed, loadouts, seat, stage: sid }) {
@@ -307,6 +358,7 @@ function quit(stay = false) {
   inBattle = false;
   session = { kind: 'local', sync: null };
   mySeat = 1;
+  practice = null;
   setPlaying(false);
   mouse.exitLock();
   setupWorld();
@@ -314,8 +366,21 @@ function quit(stay = false) {
   if (!stay) ui.show('title');
 }
 function onRematch() {
-  if (session.kind === 'local') startBattle();
+  if (practice) startPractice();
+  else if (session.kind === 'local') startBattle();
   else lobby.again();
+}
+// The time attack is over: keep the record and show the result.
+function showPracticeResult() {
+  const P = world.practice;
+  const prevBest = practiceBest[stageId] ? practiceBest[stageId].score : 0;
+  const newBest = P.score > prevBest;
+  if (newBest) { practiceBest[stageId] = { score: P.score, weapon: loadout.weapon, armor: loadout.armor }; save('skyline.practiceBest', practiceBest); }
+  lastResult = { score: P.score, breaks: P.breaks, bulls: P.bulls, shots: P.shots, hits: P.hits, dummyDamage: P.dummyDamage, best: Math.max(prevBest, P.score), newBest,
+    stage: CFG.STAGES[stageId].zh, loadout: loadoutText(loadout) };
+  setPlaying(false);
+  mouse.exitLock();
+  ui.show('presult', lastResult);
 }
 function showKo() {
   const win = world.winner === me.id;
@@ -356,7 +421,10 @@ const ctx = {
   get cpuLevel() { return settings.cpu; },
   set cpuLevel(v) { settings.cpu = pick(AI_LEVELS, v, 'normal'); },
   get note() { return mouse.state.supported ? '' : '這裡無法鎖定滑鼠：用方向鍵控制鏡頭與準星，Esc 暫停。'; },
-  startBattle, resume, quit,
+  startBattle, resume, quit, startPractice,
+  isPractice: () => !!practice,
+  practiceBest: (id) => practiceBest[id] || null,
+  practiceSetup() { quit(true); ui.show('title'); ui.show('practice'); },
   lan: lobby.state, lanDraft: '',
   get stageId() { return stageId; },
   setStage: (id) => setStage(id),
@@ -376,6 +444,7 @@ const ctx = {
     if (post) post.setEnabled(q.bloom);
     app.setPixelRatioCap(q.pixelRatio);
     for (const fx of [sparks, smoke, debris]) fx.density = q.particles;
+    twisterView.setDensity(q.particles);
     touchUi.setMode(settings.touch);
   },
 };
@@ -454,6 +523,50 @@ function handleEvent(e) {
       if (e.broke) showMsg(e.id === me.id ? '防禦被打破' : '破防');
       break;
     }
+    case 'target': {
+      boards.hit(e.tid, e.broke);
+      const col = e.ring >= 0 ? RING_FX[e.ring] : (mechs[e.by - 1] ? mechs[e.by - 1].design.palette.glow : 0xffffff);
+      sparks.burst(e.x, e.y, e.z, col, e.broke ? 36 : 12, e.broke ? 42 : 24, 0.4, 40);
+      flashes.spawn(e.x, e.y, e.z, col, e.broke ? 7 : 3, 0.08);
+      if (e.broke) {
+        debris.burst(e.x, e.y, e.z, 0xe8e2d2, 22, 34, 1.0, 50);
+        debris.burst(e.x, e.y, e.z, 0xd0403a, 12, 28, 1.0, 50);
+        smoke.burst(e.x, e.y, e.z, 0xa0a4ae, 10, 8, 0.8, -2, 2);
+        rings.spawn(e.x, e.y, e.z, col, e.bull ? 18 : 11, 0.35, { x: -Math.sin(e.yaw), y: 0, z: -Math.cos(e.yaw) });
+      }
+      if (e.by === me.id) {
+        hitmarkT = 0.1;
+        const p = project(app.camera, e.x, e.y, e.z, app.size.w, app.size.h);
+        if (p.visible && e.broke && e.points > 0) showPopup(p.x, p.y, e.bull ? `靶心 +${e.points}` : `+${e.points}`, e.bull ? 'score bull' : 'score');
+        if (e.bull) { showMsg('靶心！', 0.8); sflashT = Math.max(sflashT, 0.06); }
+      }
+      break;
+    }
+    case 'targetUp': flashes.spawn(e.x, e.y, e.z, 0x9ff3ff, 5, 0.12); rings.spawn(e.x, e.y, e.z, 0x9ff3ff, 7, 0.3, null); break;
+    case 'count':
+      if (e.clock) pTimer.classList.add('urgent');
+      else if (e.n === 0) countT = 0.8;                     // "GO!" for a moment once the clock starts
+      break;
+    case 'practiceEnd': showMsg('時間到！', 1.6); practiceEndT = 1.4; pTimer.classList.remove('urgent'); break;
+    case 'revive': {
+      const f = world.fighters[e.id - 1];
+      flashes.spawn(f.pos.x, f.pos.y + 10, f.pos.z, 0x9ff3ff, 14, 0.25);
+      rings.spawn(f.pos.x, f.pos.y + 0.5, f.pos.z, 0x9ff3ff, 20, 0.45);
+      if (e.id !== me.id) showMsg('假人站起來了', 0.9);
+      break;
+    }
+    case 'caught': {
+      smoke.burst(e.x, e.y + 6, e.z, 0xc8a070, 24, 18, 0.9, -4, 1.5);
+      if (e.id === me.id) { showMsg('被沙塵龍捲風捲起！按衝刺可以脫身', 1.8); shake.kick(0.8); }
+      break;
+    }
+    case 'fling': case 'escape': {
+      smoke.burst(e.x, e.y + 6, e.z, 0xc8a070, 16, 22, 0.8, -4, 1.5);
+      if (e.id === me.id) shake.kick(e.t === 'escape' ? 0.4 : 0.6);
+      if (e.id === me.id && e.t === 'escape') showMsg('脫身！', 0.8);
+      break;
+    }
+    case 'twister': if (Math.hypot(e.x - me.pos.x, e.z - me.pos.z) < 280) showMsg('沙塵龍捲風出現了', 1.2); break;
     case 'ko': {
       const f = world.fighters[e.id - 1];
       flashes.spawn(f.pos.x, f.pos.y + 10, f.pos.z, 0xffe0a0, 30, 0.35);
@@ -465,6 +578,7 @@ function handleEvent(e) {
       shake.kick(1.5);
       sflashT = 0.2;
       hitstopT = 0.12;
+      if (e.practice) { showMsg(e.id === me.id ? '被擊倒了，馬上站起來' : `假人倒下 · ${CFG.PRACTICE.dummyRevive} 秒後站起來`, 1.6); break; }
       koResult.textContent = e.by === me.id ? 'WIN' : 'LOSE';
       ko.classList.toggle('lose', e.by !== me.id);
       ko.classList.add('on');
@@ -498,9 +612,10 @@ function simStep(dt) {
     if (!playing) { look.yaw = yaw; look.pitch = pitch; }
     pauseGraceT -= dt;
     if (!inBattle) return;
-    if (intent.pressed.rematch && world.winner) { onRematch(); return; }
+    const over = !!(world.practice && world.practice.phase === 'over');
+    if (intent.pressed.rematch && (world.winner || over)) { onRematch(); return; }
     if (intent.pressed.pause && playing && pauseGraceT <= 0) { pause(); return; }
-    const mine = playing ? intent : IDLE_INTENT;
+    const mine = playing && !over ? intent : IDLE_INTENT;
     if (session.kind === 'guest') { session.sync.step(mine); return; }      // predicted in render
     if (session.kind === 'local' && !playing && !world.winner) return;      // paused (solo only)
     world.fighters.forEach((f, i) => { const p = prev[i]; p.x = f.pos.x; p.y = f.pos.y; p.z = f.pos.z; p.yaw = f.yaw; });
@@ -508,7 +623,7 @@ function simStep(dt) {
       session.sync.step(mine);
       if (showDebug) { hostHashes.set(world.tick, hashWorld(world)); if (hostHashes.size > 600) hostHashes.delete(hostHashes.keys().next().value); }
     } else {
-      stepWorld(world, [mine, dummyMode ? dummyStep(dt) : aiIntent(ai, world, 2, dt)], dt);
+      stepWorld(world, [mine, practice ? practiceDummyIntent() : dummyMode ? dummyStep(dt) : aiIntent(ai, world, 2, dt)], dt);
     }
     for (const e of drain(world)) { handleEvent(e); soundForEvent(sfx, e, world, me.id); }
 }
@@ -517,6 +632,7 @@ const loop = createLoop({
   maxSteps: 10,                 // the simulation is cheap; let slow renderers keep real time
   step(dt) { if (!devFreeze) simStep(dt); },
   render(alpha, frameDt) {
+    if (practiceEndT > 0) { practiceEndT -= frameDt; if (practiceEndT <= 0 && practice && inBattle) showPracticeResult(); }
     // LAN: the host sends this frame's ticks; the guest plays the confirmed events and rebuilds its view.
     if (session.kind === 'host') session.sync.flush();
     else if (session.kind === 'guest') {
@@ -577,6 +693,8 @@ const loop = createLoop({
     });
     sparks.update(animDt); smoke.update(animDt); debris.update(animDt); flashes.update(animDt); slashes.update(animDt); rings.update(animDt); tracers.update(animDt);
     bolts.sync(world.projectiles, frozen ? 0 : alpha, animDt);
+    boards.sync(world.targets, frozen ? 1 : alpha, animDt);
+    twisterView.sync(world.twisters, animDt, app.camera, app.renderer);
 
     // Camera: a slow orbit over the city behind the menus; in play, first person while aiming, the
     // lock-on orbit while locked, free orbit otherwise.
@@ -599,15 +717,21 @@ const loop = createLoop({
     }
     sfx.listen(app.camera);
     updateThrusterLoops(sfx, world, inBattle && (playing || !!world.winner));
+    updateTwisterLoops(sfx, world, inBattle);
+    // Caught in a twister: the picture shudders.
+    if (inBattle && me.caught) shake.kick(2.4 * frameDt);
     // Late afternoon into night over the course of the match (?tod=0..1 pins it for screenshots).
     const dk = CFG.STAGES[stageId].dusk;
     const phase = stageVis.setTimeOfDay(todOverride == null ? dk.start + (1 - dk.start) * world.time / dk.toNight : todOverride);
-    sky.set({ top: phase.sky.top, horizon: phase.sky.horizon, bottom: phase.sky.bottom, stars: phase.stars });
+    sky.set({ top: phase.sky.top, horizon: phase.sky.horizon, bottom: phase.sky.bottom, stars: phase.stars, disc: stageVis.theme.sun ? { dir: phase.sunDir, color: phase.sunColor } : null });
+    twisterView.setLight(phase);
+    boards.setNight(phase.night);
     sky.update(app.camera);
     app.render();
 
     // HUD.
     hud.classList.toggle('hidden', !inBattle);
+    hud.classList.toggle('practice-on', inBattle && !!practice);
     // Menus by gamepad (d-pad or stick flicks, A, B); touch controls only while playing.
     if (ui.name) { for (const b of gamepad.consumeMenu()) { if (b === 'Down') ui.moveFocus(1); else if (b === 'Up') ui.moveFocus(-1); else if (b === 'A') ui.activate(); else if (b === 'B' || b === 'Back' || b === 'Start') ui.escape(); } }
     else gamepad.consumeMenu();
@@ -663,6 +787,50 @@ const loop = createLoop({
       lost.style.transform = `translate(${x.toFixed(0)}px, ${y.toFixed(0)}px) rotate(${angle.toFixed(3)}rad)`;
     } else lost.classList.remove('on');
 
+    // Practice: score panel, clock, countdown, target markers, hint.
+    const P = world.practice;
+    if (P) {
+      const acc = P.shots ? Math.round(P.hits / P.shots * 100) : 0;
+      const ptext = `練習模式 · ${CFG.PRACTICE.modes[P.mode].zh}\n得分 ${P.score}\n擊破 ${P.breaks} · 靶心 ${P.bulls}\n命中率 ${acc}%（${P.hits}/${P.shots}）\n假人傷害 ${P.dummyDamage}`;
+      if (ptext !== lastPracticeText) { pBox.textContent = ptext; lastPracticeText = ptext; }
+      const secs = Math.ceil(P.timeLeft);
+      const ttext = P.mode !== 'timed' ? '' : P.phase === 'ready' ? `準備 ${Math.ceil(P.ready)}` : `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+      if (ttext !== lastTimerText) { pTimer.textContent = ttext; lastTimerText = ttext; }
+      // The big countdown follows the simulation (3, 2, 1), then GO! briefly.
+      if (countT > 0) countT -= frameDt;
+      const ctext = P.mode !== 'timed' ? '' : P.phase === 'ready' ? String(Math.ceil(P.ready)) : countT > 0 ? 'GO!' : '';
+      if (ctext !== pCount.textContent) {
+        pCount.textContent = ctext;
+        pCount.classList.remove('on'); void pCount.offsetWidth;
+        if (ctext) pCount.classList.add('on');
+      }
+      let k = 0;
+      for (const tg of world.targets) {
+        if (!tg.alive || k >= tMarks.length) continue;
+        const d = Math.hypot(tg.pos.x - me.pos.x, tg.pos.y - me.pos.y, tg.pos.z - me.pos.z);
+        if (d > 460 || d < 18) continue;
+        const pp = project(app.camera, tg.pos.x, tg.pos.y + tg.radius + 3, tg.pos.z, w, h);
+        if (!pp.visible) continue;
+        const mk = tMarks[k++];
+        mk.style.transform = `translate(${pp.x.toFixed(0)}px, ${pp.y.toFixed(0)}px)`;
+        mk.firstChild.textContent = `${Math.round(d)}m`;
+        mk.dataset.kind = tg.kind;
+        mk.classList.add('on');
+      }
+      for (; k < tMarks.length; k++) tMarks[k].classList.remove('on');
+      if (hintT > 0) hintT -= frameDt;
+      pHint.classList.toggle('on', hintT > 0 && !ui.name);
+    }
+    // Twisters: a warning when one is about to pull this mech in.
+    if (world.twisters && world.twisters.length) {
+      twWarnT -= frameDt;
+      if (twWarnT <= 0 && !me.caught) {
+        for (const tw of world.twisters) {
+          if (tw.strength > 0.5 && Math.hypot(tw.x - me.pos.x, tw.z - me.pos.z) < CFG.TWISTER.reach + 25) { showMsg('沙塵龍捲風接近！', 1.2); twWarnT = 8; break; }
+        }
+      }
+    }
+
     if (hitmarkT > 0) { hitmarkT -= frameDt; hitmark.classList.add('on'); } else hitmark.classList.remove('on');
     if (vignetteT > 0) { vignetteT -= frameDt; vignette.style.opacity = Math.min(1, vignetteT * 3).toFixed(2); } else if (vignette.style.opacity !== '0') vignette.style.opacity = '0';
     if (msgT > 0) { msgT -= frameDt; if (msgT <= 0) msg.classList.remove('on'); }
@@ -695,7 +863,8 @@ window.__skyline = {
     const s = session.sync;
     return { kind: session.kind, tick: world.tick, confirmedTick: s.world.tick, confirmedHash: hashWorld(s.world), stats: { ...s.stats }, hostHashes: Object.fromEntries(hostHashes) };
   },
-  setPlaying, startBattle, pause, resume, quit, loop, version: CFG.GAME.version,
+  setPlaying, startBattle, startPractice, pause, resume, quit, loop, version: CFG.GAME.version, boards, twisterView,
+  get practice() { return practice; },
   // Tooling: freeze the simulation and advance it by hand (screenshots of a pose).
   freeze(on) { devFreeze = !!on; },
   tick(n = 1) { for (let i = 0; i < n; i++) simStep(1 / 60); },

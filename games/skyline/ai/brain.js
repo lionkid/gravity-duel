@@ -7,7 +7,7 @@ import { createIntent, clearIntent } from '../../../engine/input/intent.js';
 import { makeRng } from '../../../engine/core/rng.js';
 import { distXZ, dirToAim, clamp } from '../../../engine/core/math.js';
 import { enemyOf, rangedOf, meleeOf, armorOf } from '../rules/combat.js';
-import { COMBAT, MOVE, SLOTS } from '../config.js';
+import { COMBAT, MOVE, SLOTS, TWISTER } from '../config.js';
 import { buildNavGrid } from './nav.js';
 
 export const AI_ORDER = ['easy', 'normal', 'hard'];
@@ -132,6 +132,18 @@ export function aiIntent(ai, world, playerId, dt) {
     if (!ai.nav.lineFree(me.pos.x, me.pos.z, me.pos.x + mv.x * 12, me.pos.z + mv.z * 12)) { ai.strafe = -ai.strafe; mv = { x: -side.x, z: -side.z }; }
     // Too high to hit with the vulcan: hop up; too low and far: come down by walking.
     if (dy > 12 && me.fuel > 1.2 && me.active !== 'ranged') { it.held.boost = true; if (me.onGround) it.pressed.boost = true; }
+  }
+  // Twisters: keep out of the pull, and dash out when caught (the better the pilot, the sooner).
+  if (world.twisters && world.twisters.length) {
+    for (const tw of world.twisters) {
+      if (tw.strength <= 0.2) continue;
+      const dx = me.pos.x - tw.x, dz = me.pos.z - tw.z, d = Math.hypot(dx, dz) || 1, R = TWISTER.reach + 30;
+      if (d < R) { const push = (R - d) / R * 2.5; mv = { x: mv.x + dx / d * push, z: mv.z + dz / d * push }; }
+    }
+    if (me.caught && ai.dashT <= 0 && me.fuel >= MOVE.dashFuel && ai.rnd() < k.dash * 0.06) {
+      const tw = world.twisters.find((t) => t.id === me.caught);
+      if (tw) { const dx = me.pos.x - tw.x, dz = me.pos.z - tw.z, d = Math.hypot(dx, dz) || 1; mv = { x: dx / d, z: dz / d }; it.pressed.dash = true; ai.dashT = 2; }
+    }
   }
   const ml = Math.hypot(mv.x, mv.z);
   if (ml > 1) { mv.x /= ml; mv.z /= ml; }

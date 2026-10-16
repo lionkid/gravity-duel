@@ -5,21 +5,27 @@
 import { makeRng } from '../../../engine/core/rng.js';
 import { createStatics } from '../../../engine/sim/statics.js';
 import { createBody, moveBody } from '../../../engine/sim/controller.js';
-import { approachXZ, approachAngle, dirToYaw, yawToDir, wrapAngle } from '../../../engine/core/math.js';
+import { approach, approachXZ, approachAngle, dirToYaw, yawToDir, wrapAngle } from '../../../engine/core/math.js';
 import { emit } from '../../../engine/core/events.js';
 import { IDLE_INTENT } from '../../../engine/input/intent.js';
-import { MOVE, BODY } from '../config.js';
+import { MOVE, BODY, TWISTER } from '../config.js';
 import { initCombat, stepLock, stepCombat, stepProjectiles, separateFighters, combatFacing, armorOf, rangedOf } from './combat.js';
+import { createPractice, placeTargets, stepPractice } from './targets.js';
+import { createTwisters, stepTwisters, twisterForces, caughtVelocity, escapeTwister } from './twisters.js';
 
 const BUFFERED = ['boost', 'dash', 'attack', 'lock', 'switch1', 'switch2', 'switch3', 'switchNext', 'switchPrev'];
 
-// loadouts: { 1: { weapon, armor }, 2: { weapon, armor } }
-export function createWorld({ stage, seed = 1, players = 2, loadouts = {} }) {
+// loadouts: { 1: { weapon, armor }, 2: { weapon, armor } }; practice: null | { mode: 'free' | 'timed' }
+// (bullseye targets, a dummy that stands up again, a score).
+export function createWorld({ stage, seed = 1, players = 2, loadouts = {}, practice = null }) {
   const world = {
     tick: 0, time: 0, seed, stage, winner: 0, koTick: 0, nextId: 0,
     fighters: [], projectiles: [], events: [],
     rnd: makeRng(seed),
     statics: createStatics(stage),
+    twisters: createTwisters(stage, seed),
+    targets: practice ? placeTargets(stage, seed) : [],
+    practice: practice ? createPractice(practice.mode) : null,
   };
   for (let i = 0; i < players; i++) {
     const sp = stage.spawns[i % stage.spawns.length];
@@ -49,12 +55,14 @@ export function createFighter(id, spawn, loadout) {
 
 export function stepWorld(world, intents, dt) {
   const g = world.stage.gravity;
+  stepTwisters(world, dt);
   world.fighters.forEach((f, i) => {
     const it = intents[i] || IDLE_INTENT;
     stepFighter(world, f, it, dt, g);
   });
   stepProjectiles(world, dt);
   separateFighters(world, dt);
+  stepPractice(world, dt);
   world.tick++;
   world.time += dt;
   return world;
@@ -68,6 +76,7 @@ function stepFighter(world, f, it, dt, g) {
 
   f.aim.yaw = it.aim.yaw;
   f.aim.pitch = it.aim.pitch;
+  twisterForces(world, f, dt);
   stepLock(world, f, it, dt);
   const combat = stepCombat(world, f, it, dt);
   const canAct = f.landLag <= 0 && !f.dead && f.stun <= 0 && f.guardBreak <= 0;
@@ -88,6 +97,8 @@ function stepFighter(world, f, it, dt, g) {
     const l = Math.hypot(d.x, d.z) || 1;
     f.dashDir = { x: d.x / l, z: d.z / l };
     f.onGround = false;
+    f.flung = false;
+    escapeTwister(world, f);                 // a dash breaks out of a twister
     emit(world, 'dash', { id: f.id, x: f.pos.x, y: f.pos.y, z: f.pos.z });
   }
 
@@ -101,16 +112,28 @@ function stepFighter(world, f, it, dt, g) {
     f.vel.z = f.dashDir.z * MOVE.dash;
     f.vel.y = 0;
     f.boosting = false;
+  } else if (f.caught && caughtVelocity(world, f)) {
+    // Caught in a twister: carried around the axis and up, whatever the controls say.
+    const cv = caughtVelocity(world, f);
+    approachXZ(f.vel, cv.x, cv.z, 170 * dt);
+    f.vel.y = approach(f.vel.y, cv.y, TWISTER.liftAccel * dt);
+    f.boosting = false;
+    f.onGround = false;
   } else {
     // Horizontal: snappy on the ground, limited control in the air (no air friction without input).
+    // A twister's pull is wind: it moves the velocity the controls aim for.
     const run = MOVE.run * speedMul;
+    const w = f.wind, windy = !!w && (w.x !== 0 || w.z !== 0);
     if (f.onGround) {
-      approachXZ(f.vel, mv.x * run, mv.z * run, (moving ? MOVE.accelGround : MOVE.decelGround) * dt);
+      if (windy) approachXZ(f.vel, mv.x * run + w.x, mv.z * run + w.z, (moving ? MOVE.accelGround : MOVE.decelGround) * dt);
+      else approachXZ(f.vel, mv.x * run, mv.z * run, (moving ? MOVE.accelGround : MOVE.decelGround) * dt);
     } else {
-      if (moving) approachXZ(f.vel, mv.x * MOVE.airMax * speedMul, mv.z * MOVE.airMax * speedMul, MOVE.accelAir * dt);
-      // Momentum above the air speed limit (left over from a dash) bleeds off instead of gliding forever.
+      if (windy) approachXZ(f.vel, mv.x * MOVE.airMax * speedMul + w.x, mv.z * MOVE.airMax * speedMul + w.z, MOVE.accelAir * dt);
+      else if (moving) approachXZ(f.vel, mv.x * MOVE.airMax * speedMul, mv.z * MOVE.airMax * speedMul, MOVE.accelAir * dt);
+      // Momentum above the air speed limit (left over from a dash, or a fling) bleeds off instead of gliding forever.
+      const lim = windy ? MOVE.airMax + Math.hypot(w.x, w.z) : MOVE.airMax;
       const sp = Math.hypot(f.vel.x, f.vel.z);
-      if (sp > MOVE.airMax) approachXZ(f.vel, f.vel.x / sp * MOVE.airMax, f.vel.z / sp * MOVE.airMax, MOVE.airBleed * dt);
+      if (sp > lim && !f.flung) approachXZ(f.vel, f.vel.x / sp * lim, f.vel.z / sp * lim, MOVE.airBleed * dt);
     }
     // Jump on a fresh press from the ground; thrust while held in the air.
     if (f.buf.boost > 0 && f.onGround && canAct && !combat.lockMove) {
@@ -129,9 +152,11 @@ function stepFighter(world, f, it, dt, g) {
     f.vel.y = Math.max(-MOVE.terminal, f.vel.y - g * dt);
   }
 
-  // Facing: the view while aiming; the target while locked on or swinging; otherwise the movement.
+  // Facing: the view while aiming; spun round in a twister; the target while locked on or swinging;
+  // otherwise the movement.
   const face = combatFacing(world, f, combat);
   if (f.aiming) f.yaw = approachAngle(f.yaw, f.aim.yaw, MOVE.aimTurnRate * dt);
+  else if (f.caught) f.yaw = f.yaw + TWISTER.spin * dt;
   else if (face != null && !f.dead) f.yaw = approachAngle(f.yaw, face, MOVE.turnRate * dt);
   else if (moving && f.dashTimer <= 0) f.yaw = approachAngle(f.yaw, dirToYaw(mv.x, mv.z), MOVE.turnRate * dt);
   else if (f.dashTimer > 0) f.yaw = approachAngle(f.yaw, dirToYaw(f.dashDir.x, f.dashDir.z), MOVE.turnRate * 2 * dt);
@@ -140,6 +165,7 @@ function stepFighter(world, f, it, dt, g) {
   const wasAir = !f.onGround;
   moveBody(f, world.statics, dt, { stepUp: MOVE.stepUp, snap: MOVE.snap });
   if (wasAir && f.onGround) {
+    f.flung = false;
     const hard = f.landedSpeed > MOVE.landLagSpeed;
     if (hard) f.landLag = MOVE.landLag;
     f.boosting = false;
@@ -207,6 +233,10 @@ export function hashWorld(world) {
     mix(f.active === 'melee' ? 1 : f.active === 'vulcan' ? 2 : 3); mix(f.melee ? f.melee.t : -1);
   }
   for (const p of world.projectiles) { mix(p.id); mix(p.pos.x); mix(p.pos.y); mix(p.pos.z); }
+  for (const tw of world.twisters || []) { mix(tw.x); mix(tw.z); mix(tw.strength); mix(tw.cycle); }
+  for (const f of world.fighters) mix(f.caught || 0);
+  for (const tg of world.targets || []) { mix(tg.alive); mix(tg.hp); mix(tg.yaw); }
+  if (world.practice) { mix(world.practice.score); mix(world.practice.shots); }
   mix(world.tick); mix(world.winner); mix(world.rnd.state);
   return h >>> 0;
 }

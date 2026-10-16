@@ -15,7 +15,9 @@ import { boxAt, overlaps } from '../../../engine/sim/aabb.js';
 import { bodyBox } from '../../../engine/sim/controller.js';
 import { raycast, lineOfSight, segmentBody } from '../../../engine/sim/sweep.js';
 import { emit } from '../../../engine/core/events.js';
-import { WEAPONS, ARMORS, COMBAT, SLOTS } from '../config.js';
+import { WEAPONS, ARMORS, COMBAT, SLOTS, PRACTICE } from '../config.js';
+import { firstTargetHit, hitTarget, meleeTargets, scoring } from './targets.js';
+import { swirlShot } from './twisters.js';
 
 export function initCombat(f, loadout) {
   f.loadout = { weapon: (loadout && loadout.weapon) || 'normal', armor: (loadout && loadout.armor) || 'normal' };
@@ -134,6 +136,15 @@ export function stepCombat(world, f, it, dt) {
         m.hit = true;
         applyDamage(world, e, swing.dmg, 'melee', f, { stun: w.stun, knock: swing.knock == null ? w.knock : swing.knock, guardBreak: w.guardBreak, melee: true, final: m.combo === w.combo.length - 1 });
       }
+      // Practice boards in the swing are cut down (each once per swing).
+      if (world.targets && world.targets.length) {
+        for (const tg of meleeTargets(world, swingBox(f, w))) {
+          if (!m.cut) m.cut = [];
+          if (m.cut.includes(tg.id)) continue;
+          m.cut.push(tg.id);
+          hitTarget(world, tg, swing.dmg, f, { x: tg.pos.x, y: tg.pos.y, z: tg.pos.z, r: 0 }, { melee: true });
+        }
+      }
       if (m.t >= swing.active) { m.stage = 'recovery'; m.t = 0; }
     }
     if (m.stage === 'recovery') {
@@ -205,7 +216,13 @@ function fireVulcan(world, f, dt) {
     });
     emit(world, 'shot', { id: f.id, kind: v.id, x: from.x, y: from.y, z: from.z, dx: dir.x, dy: dir.y, dz: dir.z, color: v.color });
     f.attacked = world.tick;
+    countShot(world, f);
   }
+}
+
+// Practice statistics: shots fired by the player while the score counts.
+function countShot(world, f) {
+  if (world.practice && f.id === world.practice.player && scoring(world)) world.practice.shots++;
 }
 
 function fireRanged(world, f, w, aim = f.aim) {
@@ -220,6 +237,7 @@ function fireRanged(world, f, w, aim = f.aim) {
   });
   f.attacked = world.tick;
   emit(world, 'shot', { id: f.id, kind: w.id, x: from.x, y: from.y, z: from.z, dx: dir.x, dy: dir.y, dz: dir.z, color: w.color });
+  countShot(world, f);
 }
 
 // Projectiles fly, drop if they are solid shells, and hit the first thing on their path.
@@ -230,9 +248,10 @@ export function stepProjectiles(world, dt) {
     const p = world.projectiles[i];
     p.prev.x = p.pos.x; p.prev.y = p.pos.y; p.prev.z = p.pos.z;
     p.vel.y -= g * p.gravityScale * dt;
+    if (world.twisters && world.twisters.length) swirlShot(world, p, dt);
     p.pos.x += p.vel.x * dt; p.pos.y += p.vel.y * dt; p.pos.z += p.vel.z * dt;
     p.ttl -= dt;
-    let tEnd = 1, victim = null;
+    let tEnd = 1, victim = null, target = null;
     const wall = raycast(world.statics, p.prev, p.pos);
     if (wall) tEnd = wall.t;
     for (const f of world.fighters) {
@@ -240,24 +259,31 @@ export function stepProjectiles(world, dt) {
       const hb = segmentBody(p.prev, p.pos, f);
       if (hb && hb.t < tEnd) { tEnd = hb.t; victim = f; }
     }
+    if (world.targets && world.targets.length) {
+      const th = firstTargetHit(world, p.prev, p.pos, tEnd);
+      if (th) { tEnd = th.hit.t; target = th; victim = null; }
+    }
     const out = bd && (p.pos.x < bd.minX || p.pos.x > bd.maxX || p.pos.z < bd.minZ || p.pos.z > bd.maxZ || p.pos.y > bd.ceiling);
-    if (wall || victim || p.ttl <= 0 || out) {
+    if (wall || victim || target || p.ttl <= 0 || out) {
       const hx = p.prev.x + (p.pos.x - p.prev.x) * tEnd, hy = p.prev.y + (p.pos.y - p.prev.y) * tEnd, hz = p.prev.z + (p.pos.z - p.prev.z) * tEnd;
       if (victim) {
         const shooter = world.fighters.find((f) => f.id === p.owner);
         applyDamage(world, victim, p.dmg, p.dmgKind, shooter, { stun: p.stun, knock: p.knock, x: hx, y: hy, z: hz });
       }
-      emit(world, 'impact', { x: hx, y: hy, z: hz, color: p.color, body: !!victim, kind: p.kind, look: p.look, dx: p.vel.x, dy: p.vel.y, dz: p.vel.z });
+      if (target) hitTarget(world, target.tg, p.dmg, world.fighters.find((f) => f.id === p.owner), target.hit);
+      emit(world, 'impact', { x: hx, y: hy, z: hz, color: p.color, body: !!victim || !!target, kind: p.kind, look: p.look, dx: p.vel.x, dy: p.vel.y, dz: p.vel.z });
       world.projectiles.splice(i, 1);
     }
   }
 }
 
 // The swing's hit box: reach metres ahead of the attacker, width wide, full body height.
-export function meleeHits(f, e, w) {
+export function swingBox(f, w) {
   const fwd = yawToDir(f.yaw);
-  const box = boxAt(f.pos.x + fwd.x * (w.reach / 2 + 2), f.pos.y - 2, f.pos.z + fwd.z * (w.reach / 2 + 2), Math.max(w.width, w.reach), f.size.h + 4, Math.max(w.width, w.reach));
-  return overlaps(box, bodyBox(e));
+  return boxAt(f.pos.x + fwd.x * (w.reach / 2 + 2), f.pos.y - 2, f.pos.z + fwd.z * (w.reach / 2 + 2), Math.max(w.width, w.reach), f.size.h + 4, Math.max(w.width, w.reach));
+}
+export function meleeHits(f, e, w) {
+  return overlaps(swingBox(f, w), bodyBox(e));
 }
 
 export function applyDamage(world, t, amount, kind, by, o = {}) {
@@ -271,6 +297,12 @@ export function applyDamage(world, t, amount, kind, by, o = {}) {
   }
   dmg = Math.round(dmg);
   t.hp = Math.max(0, t.hp - dmg);
+  // Practice: damage dealt to the dummy, and shots that landed on it.
+  const P = world.practice;
+  if (P && by && by.id === P.player && t.id !== by.id && scoring(world)) {
+    P.dummyDamage += dmg;
+    if (kind !== 'melee') P.hits++;
+  }
   if (!superArmor && !guarded) {
     if (o.stun) t.stun = Math.min(COMBAT.maxStun, Math.max(t.stun, o.stun));
     if (o.knock && by) {
@@ -285,9 +317,15 @@ export function applyDamage(world, t, amount, kind, by, o = {}) {
     x: o.x == null ? t.pos.x : o.x, y: o.y == null ? t.pos.y + 12 : o.y, z: o.z == null ? t.pos.z : o.z });
   if (t.hp <= 0) {
     t.dead = true; t.melee = null; t.guard = false; t.aiming = false; t.lock = 0;
-    world.winner = by ? by.id : 0;
-    world.koTick = world.tick;
-    emit(world, 'ko', { id: t.id, by: by ? by.id : 0 });
+    if (world.practice) {
+      // No winner in practice: the dummy stands up again.
+      t.revive = PRACTICE.dummyRevive;
+      emit(world, 'ko', { id: t.id, by: by ? by.id : 0, practice: true });
+    } else {
+      world.winner = by ? by.id : 0;
+      world.koTick = world.tick;
+      emit(world, 'ko', { id: t.id, by: by ? by.id : 0 });
+    }
   }
   return dmg;
 }
