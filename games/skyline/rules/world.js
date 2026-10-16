@@ -12,18 +12,21 @@ import { MOVE, BODY, TWISTER } from '../config.js';
 import { initCombat, stepLock, stepCombat, stepProjectiles, separateFighters, combatFacing, armorOf, rangedOf } from './combat.js';
 import { createPractice, placeTargets, stepPractice } from './targets.js';
 import { createTwisters, stepTwisters, twisterForces, caughtVelocity, escapeTwister } from './twisters.js';
+import { createMeteors, stepMeteors, rockContacts } from './meteors.js';
 
 const BUFFERED = ['boost', 'dash', 'attack', 'lock', 'switch1', 'switch2', 'switch3', 'switchNext', 'switchPrev'];
 
 // loadouts: { 1: { weapon, armor }, 2: { weapon, armor } }; practice: null | { mode: 'free' | 'timed' }
 // (bullseye targets, a dummy that stands up again, a score).
 export function createWorld({ stage, seed = 1, players = 2, loadouts = {}, practice = null }) {
+  const statics = createStatics(stage);
   const world = {
     tick: 0, time: 0, seed, stage, winner: 0, koTick: 0, nextId: 0,
     fighters: [], projectiles: [], events: [],
     rnd: makeRng(seed),
-    statics: createStatics(stage),
+    statics,
     twisters: createTwisters(stage, seed),
+    meteors: createMeteors(stage, seed, statics),
     targets: practice ? placeTargets(stage, seed) : [],
     practice: practice ? createPractice(practice.mode) : null,
   };
@@ -56,6 +59,7 @@ export function createFighter(id, spawn, loadout) {
 export function stepWorld(world, intents, dt) {
   const g = world.stage.gravity;
   stepTwisters(world, dt);
+  stepMeteors(world, dt);
   world.fighters.forEach((f, i) => {
     const it = intents[i] || IDLE_INTENT;
     stepFighter(world, f, it, dt, g);
@@ -164,6 +168,7 @@ function stepFighter(world, f, it, dt, g) {
 
   const wasAir = !f.onGround;
   moveBody(f, world.statics, dt, { stepUp: MOVE.stepUp, snap: MOVE.snap });
+  if (world.meteors) rockContacts(world, f, dt);       // drifting rocks push, and carry whoever stands on one
   if (wasAir && f.onGround) {
     f.flung = false;
     const hard = f.landedSpeed > MOVE.landLagSpeed;
@@ -235,6 +240,13 @@ export function hashWorld(world) {
   for (const p of world.projectiles) { mix(p.id); mix(p.pos.x); mix(p.pos.y); mix(p.pos.z); }
   for (const tw of world.twisters || []) { mix(tw.x); mix(tw.z); mix(tw.strength); mix(tw.cycle); }
   for (const f of world.fighters) mix(f.caught || 0);
+  if (world.meteors) {
+    const m = world.meteors;
+    for (const rk of m.rocks) { mix(rk.x); mix(rk.y); mix(rk.z); mix(rk.cycle); }
+    for (const st of m.strikes) { mix(st.id); mix(st.x); mix(st.y); mix(st.z); }
+    mix(m.next); mix(m.count);
+    for (const f of world.fighters) mix(f.rockOn || 0);
+  }
   for (const tg of world.targets || []) { mix(tg.alive); mix(tg.hp); mix(tg.yaw); }
   if (world.practice) { mix(world.practice.score); mix(world.practice.shots); }
   mix(world.tick); mix(world.winner); mix(world.rnd.state);

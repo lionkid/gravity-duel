@@ -90,8 +90,12 @@ export const STAGES = {
   // Open sand between adobe hamlets and flat-topped mesas; dust twisters wander through and throw
   // mechs into the sky. A long, slow afternoon into sunset.
   desert: { id: 'desert', name: 'Dune Ruins', zh: '沙漠遺跡', desc: '土牆聚落與平頂岩山，沙塵龍捲風會把機體捲上高空', theme: 'desert', gravity: 32, blocks: 8, pitch: 140, street: 64, minHeight: 10, maxHeight: 46, stepHeight: 22, highway: false, layout: 'village', mesas: 5, emptyLots: 0.25, rocks: 40, spawnZ: 110, twisters: 3, dusk: { start: 0.18, toNight: 360 } },
+  // An orbital station deck over a ringed gas giant, in a little over half a g: modules, antenna masts
+  // and cargo yards on open deck. Rocks drift slowly through the arena (moving cover that stops shots,
+  // and something to stand on), and meteors fall at the mechs: a red circle marks the spot first.
+  space: { id: 'space', name: 'Orbital Deck', zh: '軌道站', desc: '漂流的隕石會擋住去路和子彈，也能跳上去站；流星會朝機體砸下來，看到紅圈就快閃開', theme: 'space', gravity: 18, blocks: 8, pitch: 140, street: 60, minHeight: 12, maxHeight: 40, stepHeight: 24, highway: false, layout: 'station', emptyLots: 0.3, spawnZ: 110, meteors: true, dusk: { start: 1, toNight: 1 } },
 };
-export const STAGE_ORDER = ['city', 'moon', 'desert'];
+export const STAGE_ORDER = ['city', 'moon', 'desert', 'space'];
 
 // Sand twisters (stages with `twisters`). Distances in metres, speeds in m/s.
 export const TWISTER = {
@@ -110,6 +114,22 @@ export const TWISTER = {
   immune: 3.5,          // seconds after a throw or an escape with no pull and no catching
   grow: 3, fade: 3, live: [18, 28], rest: [3, 8],
   shotSwirl: 1600,      // m/s² drag on projectiles passing through the core: bends a rocket by several degrees
+};
+
+// Meteors (stages with `meteors`). Drifting rocks are spheres that float along straight lines across
+// the arena and out again: low ones skim the deck down the lanes, the others cross at height. Strikes
+// fall in a straight line and burst on the first thing they meet. Distances in metres, speeds in m/s.
+export const METEOR = {
+  rocks: { low: 6, mid: 6, high: 4 },             // how many drift at each height
+  radius: { low: [8, 13], mid: [10, 18], high: [14, 26] },
+  gap: { low: [1.5, 3], mid: [24, 56], high: [85, 150] },   // height of the rock's underside above the deck
+  speed: [3.5, 8],
+  bob: 1.2,             // metres of slow bobbing up and down
+  clear: 13, clearY: 20,   // a path keeps this far from walls and roofs, so a mech is never squeezed
+  first: 8, every: [6, 10], salvo: 4,   // seconds to the first strike and between strikes; every 4th is three
+  strikeSpeed: 260, flight: [1.6, 2.0], elevation: [0.85, 1.2], spread: 9,   // flight time (the warning), dive angle, aim scatter
+  blast: 22, dmg: [150, 40], knock: 32, knockUp: 16, stun: 0.5,   // damage from the centre of the blast to its edge
+  head: 2.5,            // radius of the falling rock
 };
 
 // Practice mode: bullseye targets ("鏢靶"), a training dummy and a time attack.

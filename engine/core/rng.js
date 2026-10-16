@@ -22,6 +22,17 @@ export function makeRng(seed) {
   return rnd;
 }
 
+// A hash in [0, 1) of two integers: random-looking numbers without a generator's state, for hazards
+// that must replay exactly from a seed and a counter (which cycle, which candidate).
+export function hash01(a, b) {
+  let h = Math.imul((a >>> 0) ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(((b >>> 0) + 0x632be5ab) >>> 0, 0xc2b2ae35);
+  h = Math.imul(h ^ (h >>> 16), 0x7feb352d);
+  h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+// A value in [lo, hi] for u in [0, 1].
+export const span = ([lo, hi], u) => lo + (hi - lo) * u;
+
 // Turns a string (a room code, a player name) into a seed.
 export function hashSeed(str) {
   let h = 2166136261;

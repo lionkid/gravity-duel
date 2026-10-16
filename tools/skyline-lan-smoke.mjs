@@ -1,6 +1,6 @@
 // Two browsers, one LAN server: the host creates a room, the guest joins it on the same server, both
 // ready up, the match runs and the guest's confirmed world is checked against the host's.
-// Development tool, not part of npm test. Usage: node tools/skyline-lan-smoke.mjs [outDir]
+// Development tool, not part of npm test. Usage: node tools/skyline-lan-smoke.mjs [outDir] [extra query, e.g. stage=space]
 import path from 'path';
 import fs from 'fs';
 import { createRequire } from 'module';
@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = process.argv[2] || path.join(root, 'build', 'smoke-lan');
+const extra = process.argv[3] ? `&${process.argv[3]}` : '';
 fs.mkdirSync(outDir, { recursive: true });
 const require = createRequire(import.meta.url);
 let chromium;
@@ -27,7 +28,8 @@ const open = async (name) => {
   const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
   page.on('console', (m) => { if (m.type() === 'error' && !m.text().includes('CERT')) errors.push(`${name} ${m.type()}: ${m.text()}`); });
   page.on('pageerror', (e) => errors.push(`${name} pageerror: ${e.message}`));
-  await page.goto(`http://127.0.0.1:${port}/games/skyline/?seed=7&debug&bloom=0`, { timeout: 120000, waitUntil: 'domcontentloaded' });
+  await page.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
+  await page.goto(`http://127.0.0.1:${port}/games/skyline/?seed=7&debug&bloom=0${extra}`, { timeout: 120000, waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => window.__skyline && window.__skyline.ui.name === 'title' && window.__skyline.lobby.state.server, null, { timeout: 120000 });
   return page;
 };

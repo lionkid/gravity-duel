@@ -11,17 +11,19 @@
 // The same grid makes the desert: `layout: 'village'` fills lots with small adobe houses instead of
 // towers, `mesas` turns some lots into two-tiered flat-topped rocks, `emptyLots` leaves open sand
 // with a few boulders, `spawnZ` sets how far apart the mechs start and `twisters` asks the world for
-// sand twisters (stage.hazards). Without these options the city and the moon come out exactly as before.
+// sand twisters (stage.hazards). `layout: 'station'` makes the orbital deck: modules, antenna masts and
+// cargo stacks on open deck, and `meteors` asks for drifting rocks and meteor strikes. Without these
+// options the city and the moon come out exactly as before.
 
 import { makeRng } from '../../../engine/core/rng.js';
 
 export function generateCity(opts = {}) {
   const o = Object.assign({ seed: 1, blocks: 8, pitch: 100, street: 30, minHeight: 25, maxHeight: 130, stepHeight: 45, gravity: 32, highway: true, rocks: 0, id: 'city', theme: 'city',
-    layout: 'blocks', mesas: 0, emptyLots: 0, spawnZ: 0, twisters: 0 }, opts);
+    layout: 'blocks', mesas: 0, emptyLots: 0, spawnZ: 0, twisters: 0, meteors: false }, opts);
   const rnd = makeRng(o.seed);
   const half = o.blocks * o.pitch / 2;
   const lot = o.pitch - o.street;
-  const statics = [], roads = [], ramps = [];
+  const statics = [], roads = [], ramps = [], beacons = [];
 
   // Spawns face each other down the central north–south street (inside the highway loop, if any).
   const loopR = Math.max(1, Math.floor(o.blocks / 4)) * o.pitch;
@@ -48,8 +50,9 @@ export function generateCity(opts = {}) {
       const cz = -half + o.pitch / 2 + bj * o.pitch;
       const kind = special.get(`${bi},${bj}`);
       if (kind === 'mesa') { buildMesa(rnd, o, cx, cz, lot, statics); continue; }
-      if (kind === 'empty') { scatterLotRocks(rnd, cx, cz, lot, statics); continue; }
+      if (kind === 'empty') { if (o.layout === 'station') scatterCrates(rnd, cx, cz, lot, statics, rnd.int(3)); else scatterLotRocks(rnd, cx, cz, lot, statics); continue; }
       if (o.layout === 'village') { buildVillage(rnd, o, cx, cz, lot, statics); continue; }
+      if (o.layout === 'station') { buildStation(rnd, o, cx, cz, lot, statics, beacons); continue; }
       const dist = Math.max(Math.abs(cx), Math.abs(cz)) / half;         // 0 centre … ~1 edge
       const base = o.maxHeight + (o.minHeight - o.maxHeight) * Math.pow(dist, 0.9);
       const boxes = layoutLot(rnd, cx, cz, lot);
@@ -80,6 +83,11 @@ export function generateCity(opts = {}) {
   // the spawns and ramps are, never touching anything else.
   if (o.rocks > 0) scatterRocks(rnd, o, half, statics, spawns);
 
+  // Hazards the world adds on top of the static stage. Meteors drift along the open lanes between lots.
+  const hazards = {};
+  if (o.twisters) hazards.twisters = { count: o.twisters };
+  if (o.meteors) hazards.meteors = { lanes: Array.from({ length: o.blocks - 1 }, (_, k) => -half + (k + 1) * o.pitch), street: o.street };
+
   return {
     id: o.id,
     theme: o.theme,
@@ -91,8 +99,8 @@ export function generateCity(opts = {}) {
     ramps,
     spawns,
     highway,
-    hazards: o.twisters ? { twisters: { count: o.twisters } } : null,
-    visual: { roads, lamps, lanes, pitch: o.pitch, street: o.street },
+    hazards: Object.keys(hazards).length ? hazards : null,
+    visual: { roads, lamps, lanes, beacons, pitch: o.pitch, street: o.street },
   };
 }
 
@@ -125,6 +133,51 @@ function buildVillage(rnd, o, cx, cz, lot, statics) {
     h = Math.round(Math.min(o.maxHeight, Math.max(o.minHeight, h)));
     statics.push({ min: [b.x - b.w / 2, 0, b.z - b.d / 2], max: [b.x + b.w / 2, h, b.z + b.d / 2], tag: 'building', tint: rnd.int(5), seed: rnd.int(1000) });
   });
+}
+
+// A station lot: one big module (now and then with a taller tier on it), two modules with a passage
+// between them, a cargo yard, or an antenna mast on a low plinth with a beacon on top.
+function buildStation(rnd, o, cx, cz, lot, statics, beacons) {
+  const L = lot - 14;
+  const box = (x, z, w, d, h, tag = 'building') => statics.push({ min: [x - w / 2, 0, z - d / 2], max: [x + w / 2, h, z + d / 2], tag, tint: rnd.int(5), seed: rnd.int(1000) });
+  const height = (lo, hi) => Math.round(Math.min(o.maxHeight, Math.max(o.minHeight, rnd.range(lo, hi))));
+  const roll = rnd();
+  if (roll < 0.42) {
+    const w = L * rnd.range(0.55, 0.9), d = L * rnd.range(0.55, 0.9);
+    const x = cx + rnd.range(-(L - w) / 2, (L - w) / 2), z = cz + rnd.range(-(L - d) / 2, (L - d) / 2);
+    const h = height(o.minHeight, o.stepHeight + 6);
+    box(x, z, w, d, h);
+    if (rnd.chance(0.45)) {
+      const tw = w * rnd.range(0.35, 0.55), td = d * rnd.range(0.35, 0.55);
+      box(x + rnd.range(-(w - tw) / 2, (w - tw) / 2), z + rnd.range(-(d - td) / 2, (d - td) / 2), tw, td, Math.min(o.maxHeight, h + Math.round(rnd.range(8, 18))));
+    }
+  } else if (roll < 0.68) {
+    const gap = rnd.range(12, 16), a = rnd.range(0.4, 0.6), w1 = (L - gap) * a, w2 = L - gap - w1, deep = L * rnd.range(0.6, 0.95);
+    const h1 = height(o.minHeight, o.stepHeight + 10), h2 = height(o.minHeight, o.maxHeight);
+    if (rnd.chance(0.5)) { box(cx - L / 2 + w1 / 2, cz, w1, deep, h1); box(cx + L / 2 - w2 / 2, cz, w2, deep, h2); }
+    else { box(cx, cz - L / 2 + w1 / 2, deep, w1, h1); box(cx, cz + L / 2 - w2 / 2, deep, w2, h2); }
+  } else if (roll < 0.84) {
+    scatterCrates(rnd, cx, cz, lot, statics, 4 + rnd.int(4));
+  } else {
+    const x = cx + rnd.range(-L / 4, L / 4), z = cz + rnd.range(-L / 4, L / 4), H = Math.round(rnd.range(60, 86));
+    box(x, z, 20, 20, 6, 'building');
+    box(x, z, 7, 7, H, 'building');
+    beacons.push([x, H + 1.2, z]);
+  }
+}
+
+// Cargo containers in a loose yard: 12 m long, single or stacked two high, a little apart so they
+// make walls to hide behind and steps to climb.
+function scatterCrates(rnd, cx, cz, lot, statics, n) {
+  const L = lot - 18;
+  for (let k = 0, tries = 0; k < n && tries < 60; tries++) {
+    const long = rnd.chance(0.5), w = long ? 12 : 5, d = long ? 5 : 12, h = rnd.chance(0.3) ? 11 : 5.5;
+    const x = cx + rnd.range(-(L - w) / 2, (L - w) / 2), z = cz + rnd.range(-(L - d) / 2, (L - d) / 2);
+    const box = { min: [x - w / 2, 0, z - d / 2], max: [x + w / 2, h, z + d / 2], tag: 'crate', tint: rnd.int(4), seed: rnd.int(1000) };
+    if (statics.some((s) => box.max[0] + 3 > s.min[0] && box.min[0] - 3 < s.max[0] && box.max[2] + 3 > s.min[2] && box.min[2] - 3 < s.max[2])) continue;
+    statics.push(box);
+    k++;
+  }
 }
 
 // Open sand with a few big boulders for cover.

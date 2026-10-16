@@ -15,6 +15,7 @@ test('every simulation event plays a defined recipe', () => {
     { t: 'hit', id: 2, amount: 50, ...at }, { t: 'hit', id: 2, amount: 200, ...at }, { t: 'hit', id: 2, amount: 10, guard: true, ...at }, { t: 'hit', id: 2, amount: 10, broke: true, ...at },
     { t: 'jump', id: 1 }, { t: 'land', id: 1, hard: false, ...at }, { t: 'land', id: 1, hard: true, ...at }, { t: 'dash', id: 1, ...at },
     { t: 'switch', id: 1 }, { t: 'lock', id: 1 }, { t: 'unlock', id: 1 }, { t: 'overheat', id: 1 }, { t: 'fence', id: 1 }, { t: 'ko', id: 2 },
+    { t: 'meteorWarn', target: 1, ...at }, { t: 'meteorWarn', target: 2, ...at }, { t: 'meteorHit', ...at }, { t: 'bump', id: 1, ...at },
   ];
   for (const e of events) soundForEvent(sfx, e, world, 1);
   assert.equal(played.length, events.length);

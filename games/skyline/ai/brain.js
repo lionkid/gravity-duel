@@ -7,7 +7,7 @@ import { createIntent, clearIntent } from '../../../engine/input/intent.js';
 import { makeRng } from '../../../engine/core/rng.js';
 import { distXZ, dirToAim, clamp } from '../../../engine/core/math.js';
 import { enemyOf, rangedOf, meleeOf, armorOf } from '../rules/combat.js';
-import { COMBAT, MOVE, SLOTS, TWISTER } from '../config.js';
+import { COMBAT, MOVE, SLOTS, TWISTER, METEOR } from '../config.js';
 import { buildNavGrid } from './nav.js';
 
 export const AI_ORDER = ['easy', 'normal', 'hard'];
@@ -35,6 +35,7 @@ export function createAI(level = 'normal', seed = 1) {
     roofGoal: null, roofT: 0, comboPressed: -1,
     lastThreat: null, threatT: 0,
     seenProj: new Set(), dodgeAt: 0, dodgeRoll: false,
+    strikes: new Map(),          // meteor strike id → { at: when it reacts, go: whether it gets out of the way }
   };
 }
 
@@ -143,6 +144,28 @@ export function aiIntent(ai, world, playerId, dt) {
     if (me.caught && ai.dashT <= 0 && me.fuel >= MOVE.dashFuel && ai.rnd() < k.dash * 0.06) {
       const tw = world.twisters.find((t) => t.id === me.caught);
       if (tw) { const dx = me.pos.x - tw.x, dz = me.pos.z - tw.z, d = Math.hypot(dx, dz) || 1; mv = { x: dx / d, z: dz / d }; it.pressed.dash = true; ai.dashT = 2; }
+    }
+  }
+  // Meteors: out of a strike's circle (how surely and how soon depends on the pilot, with a dash when
+  // it is about to land), and clear of the rocks drifting at its height.
+  if (world.meteors) {
+    const R = METEOR.blast + 8;
+    for (const s of world.meteors.strikes) {
+      const dx = me.pos.x - s.ax, dz = me.pos.z - s.az, d = Math.hypot(dx, dz);
+      if (d >= R) continue;
+      let seen = ai.strikes.get(s.id);
+      if (!seen) { seen = { at: s.t + k.reaction, go: ai.rnd() < 0.3 + 0.7 * k.dodge }; ai.strikes.set(s.id, seen); }
+      if (!seen.go || s.t < seen.at) continue;
+      const nx = d > 1e-3 ? dx / d : 1, nz = d > 1e-3 ? dz / d : 0;
+      const push = (R - d) / R * 4;
+      mv = { x: mv.x + nx * push, z: mv.z + nz * push };
+      if (s.eta < 0.9 && d < METEOR.blast + 4 && ai.dashT <= 0 && me.fuel >= MOVE.dashFuel) { mv = { x: nx, z: nz }; it.pressed.dash = true; ai.dashT = 1.5; }
+    }
+    if (ai.strikes.size > 16) for (const id of ai.strikes.keys()) if (!world.meteors.strikes.some((s) => s.id === id)) ai.strikes.delete(id);
+    for (const rk of world.meteors.rocks) {
+      if (rk.y - rk.r > me.pos.y + 20 || rk.y + rk.r < me.pos.y) continue;
+      const dx = me.pos.x - rk.x, dz = me.pos.z - rk.z, d = Math.hypot(dx, dz) || 1, R2 = rk.r + 14;
+      if (d < R2) { const push = (R2 - d) / R2 * 2; mv = { x: mv.x + dx / d * push, z: mv.z + dz / d * push }; }
     }
   }
   const ml = Math.hypot(mv.x, mv.z);

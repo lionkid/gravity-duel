@@ -22,6 +22,10 @@ const port = server.address().port;
 
 const exe = fs.existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined;
 const browser = await chromium.launch({ executablePath: exe, args: ['--no-proxy-server', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+// The web fonts come from the internet; the test runs offline, with the fallback fonts.
+const noFonts = (target) => target.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
+const openPage = browser.newPage.bind(browser);
+browser.newPage = async (...args) => { const p = await openPage(...args); await noFonts(p); return p; };
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errors = [];
 page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') errors.push(`${m.type()}: ${m.text()}`); });
@@ -134,6 +138,7 @@ await page.close();
 // Touch controls on a touch device: the overlay shows during play, a tapped button fires the vulcan.
 {
   const ctx = await browser.newContext({ hasTouch: true, viewport: { width: 1024, height: 600 } });
+  await noFonts(ctx);
   const pt = await ctx.newPage();
   pt.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   await pt.goto(`http://127.0.0.1:${port}/games/skyline/?seed=7&dummy=idle&bloom=0`, { timeout: 60000 });
@@ -146,7 +151,9 @@ await page.close();
     const ev = (type) => new PointerEvent(type, { pointerType: 'touch', pointerId: 7, isPrimary: true, bubbles: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 });
     btn.dispatchEvent(ev('pointerdown'));
     const down = window.__skyline.touch.isDown('attack');
-    await new Promise((res) => setTimeout(res, 700));
+    // Hold for 20 simulation ticks (a slow software renderer may take a few seconds for that).
+    const t0 = window.__skyline.world.tick;
+    await new Promise((res) => { const iv = setInterval(() => { if (window.__skyline.world.tick - t0 >= 20) { clearInterval(iv); res(); } }, 50); setTimeout(() => { clearInterval(iv); res(); }, 10000); });
     const heat = window.__skyline.world.fighters[0].heat;
     btn.dispatchEvent(ev('pointerup'));
     return { down, heat: +heat.toFixed(2), shown: !document.getElementById('touch').hidden };
@@ -225,6 +232,57 @@ await page.close();
   console.log(`  saved 17-desert-twister.png; player at ${st.y} m, caught ${st.caught}`);
   if (!st.caught || st.y < 20) errors.push('desert: the twister did not lift the player');
   await pd.close();
+}
+
+// The orbital deck: the station under the ringed planet, then a meteor coming down on the open
+// crossing, watched from the side, and its burst.
+{
+  const ps = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  // Each drawn frame is 1/60 s of animation however slowly SwiftShader draws it, so the short-lived
+  // burst effects are still on screen when the picture is taken.
+  await ps.addInitScript(() => { const raf = window.requestAnimationFrame.bind(window); let t = 0; window.requestAnimationFrame = (cb) => raf(() => { t += 1000 / 60; cb(t); }); });
+  ps.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
+  await ps.goto(`http://127.0.0.1:${port}/games/skyline/?seed=7&stage=space&dummy=idle`, { timeout: 90000 });
+  await ps.waitForFunction(() => window.__skyline && window.__skyline.ui.name === 'title', null, { timeout: 90000 });
+  const frames = (n) => ps.evaluate((k) => new Promise((r) => { let i = 0; const f = () => (++i >= k ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); }), n);
+  await ps.evaluate(() => { const S = window.__skyline; S.startBattle(); S.freeze(true); S.tick(3);
+    const me = S.world.fighters[0]; me.lock = 0; me.autoLock = false;
+    S.look.yaw = Math.atan2(-0.62, 0.77); S.look.pitch = 0.16; });
+  await ps.waitForTimeout(1500); await frames(3);
+  await ps.screenshot({ path: path.join(outDir, '18-space-deck.png') });
+  const deck = await ps.evaluate(() => ({ rocks: window.__skyline.world.meteors.rocks.length, planet: window.__skyline.sky.mesh.material.uniforms.planetOn.value }));
+  console.log(`  saved 18-space-deck.png; ${deck.rocks} drifting rocks, planet ${deck.planet ? 'on' : 'off'}`);
+  if (!deck.rocks || !deck.planet) errors.push('space: no rocks or no planet');
+  const flight = await ps.evaluate(() => {
+    const S = window.__skyline, w = S.world, me = w.fighters[0];
+    w.meteors.next = 0; S.tick(1); w.meteors.next = 1e9;
+    const st = w.meteors.strikes[0];
+    Object.assign(st, { ax: 0, ay: 0, az: 0 });
+    Object.assign(st, { x: -st.vx * st.eta, y: 2.5 - st.vy * st.eta, z: -st.vz * st.eta });
+    S.tick(Math.round(st.eta * 60) - 30);
+    const h = Math.hypot(st.vx, st.vz), ux = st.vx / h, uz = st.vz / h;
+    Object.assign(me.pos, { x: -uz * 150, y: 0, z: ux * 150 });
+    const dx = st.x / 2 - me.pos.x, dz = st.z / 2 - me.pos.z;
+    S.look.yaw = Math.atan2(-dx, -dz) + 0.12; S.look.pitch = Math.atan2(st.y / 2 - 14, Math.hypot(dx, dz)) * 0.8;
+    return { eta: +st.eta.toFixed(2), height: Math.round(st.y), strikes: w.meteors.strikes.length };
+  });
+  await ps.waitForTimeout(1500); await frames(3);
+  await ps.screenshot({ path: path.join(outDir, '19-space-meteor.png') });
+  console.log(`  saved 19-space-meteor.png; meteor ${flight.height} m up, ${flight.eta} s from the deck`);
+  if (flight.strikes !== 1) errors.push('space: the strike did not launch');
+  const boom = await ps.evaluate(() => {
+    const S = window.__skyline, w = S.world;
+    let n = 0;
+    while (w.meteors.strikes.length && n < 120) { S.tick(1); n++; }
+    return { landed: !w.meteors.strikes.length, ticks: n };
+  });
+  if (!boom.landed) errors.push('space: the meteor never landed');
+  // Toward the burst, turned a little so the mech does not stand in front of it.
+  await ps.evaluate(() => { const S = window.__skyline; const d = { x: -S.world.fighters[0].pos.x, z: -S.world.fighters[0].pos.z }; S.look.yaw = Math.atan2(-d.x, -d.z) - 0.3; S.look.pitch = 0.08; });
+  await frames(6);
+  await ps.screenshot({ path: path.join(outDir, '20-space-burst.png') });
+  console.log(`  saved 20-space-burst.png; landed after ${boom.ticks} more ticks`);
+  await ps.close();
 }
 
 // Postcard views (with bloom): the north ramp and deck from the street, the skyline from above, and the moon.

@@ -48,6 +48,23 @@ THEMES.desert = {
   windows: 'adobe', roadLines: false, strata: true, ripples: true, dunes: 44, sunDisc: true,
 };
 
+// The orbital deck: night in hard, unfiltered sunlight. Steel deck plates with dark seams and glowing
+// lane edges, station modules with panel seams, lit portholes and light bands, cargo containers in
+// four colours, blinking beacons on the masts, a deck that ends a little past the fence over the void,
+// and in the sky (sky.js) a ringed gas giant, a faint nebula and stars all round.
+const ORBIT = { sky: [0x000000, 0x03050c, 0x000000], sun: { color: 0xfff4e6, intensity: 3.1, dir: [-0.45, 0.62, 0.64] }, hemi: { sky: 0x42527a, ground: 0x3a3530, intensity: 0.95 }, fog: 0x010206, fogDensity: 0.00014, stars: 1.6, night: 1, envDay: 0 };
+THEMES.space = {
+  palette: Object.assign({}, DEFAULT_PALETTE, { ground: 0x59606e, road: 0x474d59, lane: 0x5fe6ff, kerb: 0x3a3f4a, concrete: 0x6a7180, rail: 0x9aa3b2, lamp: 0xd8f4ff, fence: 0x58e0ff, fenceOpacity: 0.004,
+    beacon: 0xff3a30, edge: 0x2a2f38, crates: [0xd0662e, 0x2f6fb0, 0xc9cdd3, 0x7d8a52], buildings: [0x8c93a1, 0x9aa1ad, 0x7c8494, 0xa8adb6, 0x6f7889] }),
+  phases: [Object.assign({ t: 0 }, ORBIT), Object.assign({ t: 0.5 }, ORBIT), Object.assign({ t: 1 }, ORBIT)],
+  windows: 'station', plates: true, deck: 1.45, laneGlow: 2.6, fenceLine: 2.2, sunDisc: true,
+  sky: {
+    starsBelow: true,
+    planet: { dir: [0.62, 0.16, -0.77], size: 0.22, sun: ORBIT.sun.dir, colorA: 0xb9824e, colorB: 0xf2dcb4, ring: { normal: [0.22, 0.95, 0.2], inner: 1.35, outer: 2.35, color: 0xd9c9a6 } },
+    nebula: { strength: 0.45, axis: [0.82, 0.38, 0.43], colorA: 0x6a35a8, colorB: 0x2280b0 },
+  },
+};
+
 // World position and normal for a material's fragment code (instanced or not), plus a hook for the
 // fragment: `code` runs after the colour is known, with vWPos and vWNormal available.
 function worldShade(mat, key, code, { uniforms = null } = {}) {
@@ -83,6 +100,29 @@ const RIPPLES = `
   float rip = sin(dot(q, vec2(0.21, 0.13)) + sin(q.x * 0.011) * 3.0 + sin(q.y * 0.017) * 2.0);
   float rip2 = sin(dot(q, vec2(-0.08, 0.31)) * 1.7 + sin(q.x * 0.004) * 4.0);
   diffuseColor.rgb *= 1.0 + (0.05 * rip + 0.025 * rip2) * aa;`;
+
+// Steel deck plates, 12 m square: dark seams and a slightly different sheen per plate, faded out
+// where a plate is only a few pixels across.
+const PLATES = `
+  vec2 q = vWPos.xz / 12.0;
+  vec2 cell = floor(q), f = fract(q), fw = fwidth(q);
+  float aa = clamp(1.0 - max(fw.x, fw.y) * 2.0, 0.0, 1.0);
+  vec2 e = smoothstep(vec2(0.0), fw * 1.5 + 0.015, f) * smoothstep(vec2(0.0), fw * 1.5 + 0.015, 1.0 - f);
+  float seam = 1.0 - e.x * e.y;
+  float h = fract(sin(dot(cell, vec2(127.1, 311.7))) * 43758.5453);
+  vec2 g = fract(q * 3.0), gw = fw * 3.0;
+  vec2 ge = smoothstep(vec2(0.0), gw * 1.5 + 0.02, g) * smoothstep(vec2(0.0), gw * 1.5 + 0.02, 1.0 - g);
+  float grid = (1.0 - ge.x * ge.y) * clamp(1.0 - max(gw.x, gw.y) * 2.0, 0.0, 1.0);
+  diffuseColor.rgb *= mix(1.0, (0.86 + 0.18 * h) * (1.0 - 0.6 * seam) * (1.0 - 0.12 * grid), aa);`;
+// Corrugated container walls: ribs along the long side, a paler lid.
+const CRATE_RIBS = `
+  vec3 an = abs(vWNormal);
+  if (an.y < 0.5) {
+    float u = an.x > an.z ? vWPos.z : vWPos.x;
+    float fw = fwidth(u * 3.4);
+    float rib = sin(u * 3.4 * 6.2832) * clamp(1.0 - fw * 2.5, 0.0, 1.0);
+    diffuseColor.rgb *= 0.9 + 0.1 * rib;
+  } else diffuseColor.rgb *= 1.12;`;
 
 function gradientEnvironment(renderer, stops) {
   const c = document.createElement('canvas');
@@ -132,21 +172,24 @@ export function buildStageVisual(scene, stage, options = {}) {
   sun.position.set(-320, 520, 240);
   group.add(hemi, sun);
 
-  // Ground.
-  const extent = Math.max(b.maxX - b.minX, b.maxZ - b.minZ) * 3;
-  const groundMat = new THREE.MeshStandardMaterial({ color: pal.ground, roughness: 0.95, metalness: 0 });
+  // Ground. A station's deck ends a little past the fence, over the void.
+  const extent = Math.max(b.maxX - b.minX, b.maxZ - b.minZ) * (theme.deck || 3);
+  const groundMat = theme.plates ? new THREE.MeshStandardMaterial({ color: pal.ground, roughness: 0.62, metalness: 0.55 }) : new THREE.MeshStandardMaterial({ color: pal.ground, roughness: 0.95, metalness: 0 });
   if (theme.ripples) worldShade(groundMat, 'sand-ground', RIPPLES);
+  if (theme.plates) worldShade(groundMat, 'deck-plates', PLATES);
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(extent, extent), groundMat);
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = groundY;
   group.add(ground);
+  if (theme.deck) group.add(buildDeckEdge(extent, pal, groundY));
   if (theme.craters) group.add(buildCraters(stage, theme.craters, pal, groundY));
   if (theme.dunes) group.add(buildDunes(stage, theme.dunes, pal, groundY));
 
   // Roads: lighter strips with a pale line along each edge.
   const roads = (stage.visual && stage.visual.roads) || [];
   if (roads.length) {
-    const roadMat = new THREE.MeshStandardMaterial({ color: pal.road, roughness: 0.9, metalness: 0 });
+    const roadMat = theme.plates ? new THREE.MeshStandardMaterial({ color: pal.road, roughness: 0.6, metalness: 0.55 }) : new THREE.MeshStandardMaterial({ color: pal.road, roughness: 0.9, metalness: 0 });
+    if (theme.plates) worldShade(roadMat, 'lane-plates', PLATES);
     const lines = [];
     for (const r of roads) {
       const w = r.x1 - r.x0, d = r.z1 - r.z0;
@@ -161,20 +204,26 @@ export function buildStageVisual(scene, stage, options = {}) {
     if (theme.roadLines !== false) {
       const lg = new THREE.BufferGeometry();
       lg.setAttribute('position', new THREE.Float32BufferAttribute(lines, 3));
-      group.add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: pal.lane, transparent: true, opacity: 0.55 })));
+      // Glowing lane edges (a colour brighter than white, so the bloom picks them up) on the deck.
+      const lineMat = new THREE.LineBasicMaterial({ color: pal.lane, transparent: true, opacity: theme.laneGlow ? 0.85 : 0.55 });
+      if (theme.laneGlow) lineMat.color.multiplyScalar(theme.laneGlow);
+      group.add(new THREE.LineSegments(lg, lineMat));
     }
   }
 
   // Static boxes by tag.
   const byTag = {};
   for (const s of stage.statics) (byTag[s.tag || 'building'] = byTag[s.tag || 'building'] || []).push(s);
-  const buildings = byTag.building ? buildBuildings(byTag.building, pal, theme.windows === 'adobe' ? 1 : 0) : null;
+  const buildings = byTag.building ? buildBuildings(byTag.building, pal, theme.windows === 'adobe' ? 1 : theme.windows === 'station' ? 2 : 0) : null;
   if (buildings) group.add(buildings.mesh);
   for (const tag of ['deck', 'kerb', 'rail', 'pillar', 'prop', 'rock', 'mesa']) if (byTag[tag]) group.add(buildPlainBoxes(byTag[tag], tag, pal, { strata: tag === 'mesa' || (tag === 'rock' && theme.strata) }));
+  if (byTag.crate) group.add(buildCrates(byTag.crate, pal));
   for (const r of stage.ramps || []) group.add(buildRamp(r, pal));
   const vis = stage.visual || {};
   const lamps = vis.lamps && vis.lamps.length ? buildLamps(vis.lamps, pal) : null;
   if (lamps) group.add(lamps.group);
+  const beacons = vis.beacons && vis.beacons.length ? buildBeacons(vis.beacons, pal) : null;
+  if (beacons) group.add(beacons.mesh);
   if (vis.lanes && vis.lanes.length) group.add(buildDashes(vis.lanes, pal));
 
   // The arena fence: faint glowing walls at the bounds.
@@ -186,6 +235,15 @@ export function buildStageVisual(scene, stage, options = {}) {
   addWall(b.maxX - b.minX, (b.minX + b.maxX) / 2, b.maxZ, 0);
   addWall(b.maxZ - b.minZ, b.minX, (b.minZ + b.maxZ) / 2, Math.PI / 2);
   addWall(b.maxZ - b.minZ, b.maxX, (b.minZ + b.maxZ) / 2, Math.PI / 2);
+  // Against a black sky the walls can hardly show, so a glowing line on the floor marks the fence too.
+  if (theme.fenceLine) {
+    const y = groundY + 0.08;
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute('position', new THREE.Float32BufferAttribute([b.minX, y, b.minZ, b.maxX, y, b.minZ, b.maxX, y, b.maxZ, b.minX, y, b.maxZ], 3));
+    const lm = new THREE.LineBasicMaterial({ color: pal.fence, transparent: true, opacity: 0.9 });
+    lm.color.multiplyScalar(theme.fenceLine);
+    fence.add(new THREE.LineLoop(lg, lm));
+  }
   group.add(fence);
   scene.add(group);
 
@@ -229,7 +287,10 @@ export function buildStageVisual(scene, stage, options = {}) {
 
   return {
     group, setTimeOfDay, phase,
-    theme: { id: options.theme || stage.theme || 'city', earth: theme.earth || null, sun: !!theme.sunDisc },
+    // Per frame: whatever on the stage moves by itself (the beacons blink).
+    animate(time) { if (beacons) beacons.blink(time); },
+    theme: { id: options.theme || stage.theme || 'city', earth: theme.earth || null, sun: !!theme.sunDisc,
+      sky: Object.assign({ earth: theme.earth || null, planet: null, nebula: null, starsBelow: false }, theme.sky || {}) },
     dispose() {
       scene.remove(group);
       group.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material && o.material.dispose) o.material.dispose(); });
@@ -254,6 +315,68 @@ function buildLamps(lamps, pal) {
   posts.name = 'lamp-posts'; heads.name = 'lamp-heads';
   g.add(posts, heads);
   return { group: g, setNight(n) { headMat.emissiveIntensity = 2.5 * Math.max(0, Math.min(1, (n - 0.35) / 0.4)); } };
+}
+
+// Red beacons on the antenna masts, blinking slowly, each a little out of step with the others.
+function buildBeacons(list, pal) {
+  const geo = new THREE.BoxGeometry(1.6, 1.6, 1.6);
+  const phase = new Float32Array(list.length);
+  geo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(phase, 1));
+  const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(pal.beacon || 0xff3030).multiplyScalar(3) });
+  const uTime = { value: 0 };
+  mat.customProgramCacheKey = () => 'beacons';
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = uTime;
+    shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nattribute float aPhase;\nvarying float vBlink;\nuniform float uTime;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvBlink = 0.12 + 0.88 * step(0.72, fract(uTime * 0.55 + aPhase));');
+    shader.fragmentShader = shader.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vBlink;')
+      .replace('#include <opaque_fragment>', 'outgoingLight *= vBlink;\n#include <opaque_fragment>');
+  };
+  const mesh = new THREE.InstancedMesh(geo, mat, list.length);
+  const m = new THREE.Matrix4();
+  list.forEach((p, i) => { m.makeTranslation(p[0], p[1], p[2]); mesh.setMatrixAt(i, m); phase[i] = (i * 0.37) % 1; });
+  mesh.name = 'beacons';
+  return { mesh, blink(t) { uTime.value = t; } };
+}
+
+// The deck's edge: its thickness under the plates, a dark lip and a line of lights round the rim.
+function buildDeckEdge(extent, pal, groundY) {
+  const g = new THREE.Group();
+  g.name = 'deck-edge';
+  const h = extent / 2;
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(extent, 26, extent), new THREE.MeshStandardMaterial({ color: pal.edge || 0x2a2f38, roughness: 0.7, metalness: 0.6 }));
+  slab.position.set(0, groundY - 13.05, 0);
+  g.add(slab);
+  const lipMat = new THREE.MeshStandardMaterial({ color: pal.kerb, roughness: 0.6, metalness: 0.6 });
+  for (const [x, z, w, d] of [[0, h, extent, 3], [0, -h, extent, 3], [h, 0, 3, extent], [-h, 0, 3, extent]]) {
+    const lip = new THREE.Mesh(new THREE.BoxGeometry(w, 1.6, d), lipMat);
+    lip.position.set(x, groundY + 0.8, z);
+    g.add(lip);
+  }
+  const pts = [];
+  for (let v = -h + 10; v <= h - 10; v += 20) pts.push(v, h - 3, -v, -h + 3, h - 3, v, -h + 3, v);
+  const lights = new THREE.InstancedMesh(new THREE.BoxGeometry(1.2, 0.5, 1.2), new THREE.MeshBasicMaterial({ color: new THREE.Color(pal.lane || 0x5fe6ff).multiplyScalar(2.2) }), pts.length / 2);
+  const m = new THREE.Matrix4();
+  for (let i = 0; i < pts.length / 2; i++) { m.makeTranslation(pts[i * 2], groundY + 0.3, pts[i * 2 + 1]); lights.setMatrixAt(i, m); }
+  g.add(lights);
+  return g;
+}
+
+// Cargo containers: one instanced mesh, coloured per container from the palette.
+function buildCrates(list, pal) {
+  const mat = worldShade(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7, metalness: 0.35 }), 'crate-ribs', CRATE_RIBS);
+  const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mat, list.length);
+  const m = new THREE.Matrix4(), color = new THREE.Color();
+  const colors = pal.crates || [pal.concrete];
+  list.forEach((s, i) => {
+    m.makeScale(s.max[0] - s.min[0], s.max[1] - s.min[1], s.max[2] - s.min[2]);
+    m.setPosition((s.min[0] + s.max[0]) / 2, (s.min[1] + s.max[1]) / 2, (s.min[2] + s.max[2]) / 2);
+    mesh.setMatrixAt(i, m);
+    mesh.setColorAt(i, color.setHex(colors[(s.tint || 0) % colors.length]));
+  });
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  mesh.name = 'statics:crate';
+  return mesh;
 }
 
 // Dashed centre lines (6 m dash, 6 m gap) for roads and decks.
@@ -400,14 +523,52 @@ const ADOBE_WALLS = `
           }
         }`;
 
-// style 0: glass towers with a grid of windows; 1: adobe walls with small dark openings.
+// Station modules: steel panels with seams, a row of portholes on every third course (most of them
+// lit), a thin light band every 12 m of height, and darker plated roofs.
+const STATION_WALLS = `
+        {
+          vec3 an = abs(vWNormal);
+          if (an.y < 0.5) {
+            vec2 uv = an.x > an.z ? vec2(vWPos.z, vWPos.y) : vec2(vWPos.x, vWPos.y);
+            vec2 cuv = uv / vec2(8.0, 4.0);
+            vec2 cell = floor(cuv), f = fract(cuv), fw = fwidth(cuv);
+            float far = smoothstep(0.12, 0.4, max(fw.x, fw.y));
+            vec2 e = smoothstep(vec2(0.0), fw * 1.2 + 0.03, f) * smoothstep(vec2(0.0), fw * 1.2 + 0.03, 1.0 - f);
+            float seam = (1.0 - e.x * e.y) * (1.0 - far);
+            float h = cityHash(cell);
+            diffuseColor.rgb *= (0.88 + 0.14 * h) * (1.0 - 0.5 * seam);
+            float row = step(1.5, mod(cell.y, 3.0)) * (1.0 - step(2.5, mod(cell.y, 3.0)));
+            vec2 pm = (f - 0.5) * vec2(8.0, 4.0);
+            float pd = length(pm * vec2(1.0, 1.3));
+            float pw = max(fw.x * 8.0, fw.y * 4.0) * 1.5;
+            float port = row * (1.0 - smoothstep(0.85 - pw, 0.85 + pw, pd)) * (1.0 - far);
+            float lit = step(0.22, h);
+            vec3 pc = mix(vec3(0.62, 0.9, 1.0), vec3(1.0, 0.8, 0.52), step(0.72, h));
+            diffuseColor.rgb *= 1.0 - port * 0.75;
+            totalEmissiveRadiance += pc * (port * lit * 1.7 + far * row * 0.05) * uNight;
+            float yb = fract((vWPos.y - 10.7) / 12.0) * 12.0;
+            float bw = fwidth(vWPos.y) * 1.5;
+            float band = (1.0 - smoothstep(0.3, 0.3 + bw + 0.02, yb)) * (1.0 - far * 0.7);
+            totalEmissiveRadiance += vec3(0.35, 0.9, 1.0) * band * 1.3 * uNight;
+          } else {
+            vec2 q = vWPos.xz / 6.0;
+            vec2 f = fract(q), fw = fwidth(q);
+            vec2 e = smoothstep(vec2(0.0), fw * 1.5 + 0.03, f) * smoothstep(vec2(0.0), fw * 1.5 + 0.03, 1.0 - f);
+            float aa = clamp(1.0 - max(fw.x, fw.y) * 2.0, 0.0, 1.0);
+            diffuseColor.rgb *= 0.7 * (1.0 - 0.35 * (1.0 - e.x * e.y) * aa);
+          }
+        }`;
+
+// style 0: glass towers with a grid of windows; 1: adobe walls with small dark openings; 2: station modules.
 function buildBuildings(list, pal, style = 0) {
   const geo = new THREE.BoxGeometry(1, 1, 1);
   const seeds = new Float32Array(list.length);
   geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seeds, 1));
-  const mat = style ? new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, metalness: 0 }) : new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55, metalness: 0.25 });
+  const mat = style === 1 ? new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, metalness: 0 })
+    : style === 2 ? new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5, metalness: 0.5 })
+      : new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55, metalness: 0.25 });
   const uniforms = { uNight: { value: 1 } };
-  mat.customProgramCacheKey = () => (style ? 'adobe-walls' : 'city-windows');
+  mat.customProgramCacheKey = () => ['city-windows', 'adobe-walls', 'station-walls'][style];
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uNight = uniforms.uNight;
     shader.vertexShader = shader.vertexShader
@@ -432,7 +593,7 @@ function buildBuildings(list, pal, style = 0) {
         // differences across a wall into speckle.
         float cityHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7)) + floor(vSeed + 0.5) * 17.31) * 43758.5453); }`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-${style ? ADOBE_WALLS : CITY_WALLS}`);
+${[CITY_WALLS, ADOBE_WALLS, STATION_WALLS][style]}`);
   };
   const mesh = new THREE.InstancedMesh(geo, mat, list.length);
   const m = new THREE.Matrix4();

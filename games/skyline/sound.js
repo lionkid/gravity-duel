@@ -21,6 +21,11 @@ export const RECIPES = {
   caught: (s, o) => { s.noise('bandpass', 300, 1800, 0.9, 0.5, o, 1.2); s.tone('sine', 90, 180, 0.8, 0.12, o); },
   fling: (s, o) => { s.noise('bandpass', 1600, 300, 0.7, 0.45, o, 1.2); },
   dry: (s, o) => { s.tone('square', 1500, 1000, 0.025, 0.07, o); s.noise('highpass', 3000, 2000, 0.03, 0.08, o); },
+  // Meteors: a two-tone alarm when one is coming for you, a deep blast when it lands, a dull knock off a rock.
+  meteorWarn: (s, o) => { for (let i = 0; i < 4; i++) s.tone('square', i % 2 ? 620 : 930, i % 2 ? 600 : 900, 0.13, 0.075, o, i * 0.15); },
+  meteorFar: (s, o) => { s.tone('sine', 1250, 900, 0.5, 0.06, o); },
+  meteorBoom: (s, o) => { s.noise('lowpass', 1500, 50, 1.7, 1.0, o); s.tone('sine', 85, 24, 1.3, 0.75, o); s.noise('bandpass', 2600, 300, 0.45, 0.55, o, 1.4); s.noise('lowpass', 500, 60, 2.4, 0.4, o, 1, 0.12); },
+  rockBump: (s, o) => { if (!s.throttle('rockBump', 0.25)) return; s.noise('lowpass', 420, 90, 0.3, 0.45, o); s.tone('sine', 70, 40, 0.25, 0.22, o); },
   lunge: (s, o) => { s.noise('bandpass', 400, 1800, 0.3, 0.3, o, 2); },
   hit: (s, o) => { s.noise('lowpass', 2600, 300, 0.14, 0.35, o); s.tone('square', 190, 70, 0.1, 0.12, o); },
   hitHeavy: (s, o) => { s.noise('lowpass', 2000, 100, 0.35, 0.6, o); s.tone('square', 130, 38, 0.26, 0.25, o); s.tone('sine', 60, 30, 0.3, 0.3, o); },
@@ -57,6 +62,9 @@ export function soundForEvent(sfx, e, world, localId = 1) {
     case 'count': sfx.play(e.n > 0 ? 'count' : 'countGo', null); break;
     case 'practiceEnd': sfx.play('buzzer', null); break;
     case 'caught': sfx.play('caught', at); break;
+    case 'meteorWarn': if (e.target === localId) sfx.play('meteorWarn', null); else sfx.play('meteorFar', at); break;
+    case 'meteorHit': sfx.play('meteorBoom', at); break;
+    case 'bump': sfx.play('rockBump', at); break;
     case 'fling': case 'escape': sfx.play('fling', at); break;
     case 'melee': if (e.lunge) sfx.play('lunge', fighterPos(e.id)); break;
     case 'hit': sfx.play(e.broke ? 'broke' : e.guard ? 'guard' : e.amount >= 120 || e.final ? 'hitHeavy' : 'hit', at); break;
@@ -77,6 +85,15 @@ export function soundForEvent(sfx, e, world, localId = 1) {
 export function updateTwisterLoops(sfx, world, active) {
   for (const tw of world.twisters || []) {
     sfx.setLoop(`twister${tw.id}`, active ? tw.strength : 0, { x: tw.x, y: 20, z: tw.z }, { freq: 260, q: 0.5, gain: 0.5 });
+  }
+}
+
+// A falling meteor roars as it comes down, louder as it closes in (one loop per slot in the list).
+export function updateMeteorLoops(sfx, world, active, slots = 8) {
+  const list = (world.meteors && world.meteors.strikes) || [];
+  for (let i = 0; i < slots; i++) {
+    const s = list[i];
+    sfx.setLoop(`meteor${i}`, active && s ? Math.min(1, 0.35 + s.t * 0.5) : 0, s ? { x: s.x, y: s.y, z: s.z } : null, { freq: 380, q: 0.6, gain: 0.7 });
   }
 }
 

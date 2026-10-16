@@ -33,7 +33,7 @@ function aimedShot(w, at) {
 }
 
 test('targets stand in the open on every stage, of every kind, the same for the same seed', () => {
-  for (const id of ['city', 'moon', 'desert']) {
+  for (const id of ['city', 'moon', 'desert', 'space']) {
     const st = stageOf(id);
     const a = placeTargets(st, 7);
     assert.deepEqual(placeTargets(st, 7), a);

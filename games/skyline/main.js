@@ -23,6 +23,8 @@ import { createBlobShadow, createSparks, createSlashes, createProjectileView, cr
 import { createPost } from '../../engine/render/post.js';
 import { createTargetView } from '../../engine/render/targets.js';
 import { createTwisterView } from '../../engine/render/twister.js';
+import { createMeteorView } from '../../engine/render/meteors.js';
+import { raycast } from '../../engine/sim/sweep.js';
 import { createSynth } from '../../engine/audio/synth.js';
 import { createScreens } from '../../engine/ui/screens.js';
 import { createSocket } from '../../engine/net/socket.js';
@@ -33,7 +35,8 @@ import { createWorld, stepWorld, cloneWorld, serializeWorld, applySnapshot, hash
 import { weaponIn, meleeOf, rangedOf } from './rules/combat.js';
 import { AX01, withPalette } from './mechs/ax01.js';
 import { createAI, aiIntent, AI_LEVELS } from './ai/brain.js';
-import { RECIPES, soundForEvent, updateThrusterLoops, updateTwisterLoops } from './sound.js';
+import { RECIPES, soundForEvent, updateThrusterLoops, updateTwisterLoops, updateMeteorLoops } from './sound.js';
+import { driftRocks } from './rules/meteors.js';
 import { defineScreens } from './screens.js';
 import { createLobby } from './lobby.js';
 
@@ -76,7 +79,7 @@ const app = createRenderApp(canvas, { fov: CFG.CAMERA.tp.fov });
 const environments = createEnvironments(app.renderer);
 let stageVis = buildStageVisual(app.scene, stage, { environments, timeOfDay: CFG.STAGES[stageId].dusk.start });
 const sky = createSky();
-sky.set({ earth: stageVis.theme.earth || null });
+sky.set(stageVis.theme.sky);
 app.scene.add(sky.mesh);
 const post = params.get('bloom') === '0' ? null : createPost(app, { strength: 0.42, radius: 0.3, threshold: 1.0 });
 const mechs = [buildMech(AX01), buildMech(withPalette(AX01, CFG.PALETTES.crimson, 'ax01-crimson'))];
@@ -93,6 +96,7 @@ const bolts = createProjectileView(app.scene, { smoke, sparks });
 const trails = mechs.map((m) => createBladeTrail(app.scene, { color: m.design.palette.glow }));
 const boards = createTargetView(app.scene);
 const twisterView = createTwisterView(app.scene, { height: CFG.TWISTER.height });
+const meteorView = createMeteorView(app.scene, { smoke, sparks, blast: CFG.METEOR.blast });
 const RING_FX = [0xffd040, 0xff5a50, 0x5a9bff, 0xc8ccd6, 0xffffff];   // spark colours by ring, bullseye first
 const shake = createShake();
 // Warm up every material once so the first shot, flash, ring or trail does not stall on shader
@@ -161,6 +165,7 @@ el('div', 'cdring', crosshair);
 const sflash = el('div', 'sflash', hud);
 const hitmark = el('div', 'hitmark', hud);
 const vignette = el('div', 'vignette', hud);
+const danger = el('div', 'danger', hud);              // red pulse while standing where a meteor will land
 const msg = el('div', 'msg', hud);
 const ko = el('div', 'ko', hud);
 const koResult = el('div', 'result', ko);
@@ -185,7 +190,7 @@ function showPopup(x, y, text, cls = '') {
 }
 const showDamage = (x, y, amount, heavy, mine) => showPopup(x, y, String(amount), `${heavy ? 'heavy' : ''} ${mine ? 'me' : ''}`);
 let showDebug = params.has('debug');
-let hitmarkT = 0, vignetteT = 0, msgT = 0, sflashT = 0, denyT = 0, countT = 0, hintT = 0, practiceEndT = 0, twWarnT = 0;
+let hitmarkT = 0, vignetteT = 0, msgT = 0, sflashT = 0, denyT = 0, countT = 0, hintT = 0, practiceEndT = 0, twWarnT = 0, koCause = '';
 let lastPracticeText = '', lastTimerText = '';
 let lastResult = null;                       // the last time attack, for the result screen
 const showMsg = (text, t = 1.2) => { msg.textContent = text; msg.classList.add('on'); msgT = t; };
@@ -208,7 +213,7 @@ function setStage(id, { fromPeer = false } = {}) {
   stageVis.dispose();
   stage = generateCity(Object.assign({ seed }, CFG.STAGES[stageId]));
   stageVis = buildStageVisual(app.scene, stage, { environments, timeOfDay: CFG.STAGES[stageId].dusk.start });
-  sky.set({ earth: stageVis.theme.earth || null });
+  sky.set(stageVis.theme.sky);
   warmMaterials();
   if (!inBattle) setupWorld();
   if (!fromPeer) lobby.setStage(id);
@@ -231,8 +236,9 @@ function setupWorld({ matchSeed = seed, loadouts = practice ? { 1: loadout, 2: {
     m.flash = 0;
     m.materials.glow.emissiveIntensity = 2.2;
   });
-  for (const fx of [sparks, smoke, debris, flashes, slashes, rings, tracers, bolts, boards, twisterView, ...trails]) fx.clear();
-  countT = 0; practiceEndT = 0; twWarnT = 0; pCount.textContent = ''; pTimer.classList.remove('urgent');
+  for (const fx of [sparks, smoke, debris, flashes, slashes, rings, tracers, bolts, boards, twisterView, meteorView, ...trails]) fx.clear();
+  countT = 0; practiceEndT = 0; twWarnT = 0; koCause = ''; pCount.textContent = ''; pTimer.classList.remove('urgent');
+  danger.classList.remove('on');
   for (const fx of mechFx) { fx.hitT = Infinity; fx.firedT = Infinity; }
   hitstopT = 0; koT = 0;
   lastSeen = null;
@@ -386,7 +392,8 @@ function showKo() {
   const win = world.winner === me.id;
   const left = Math.max(0, Math.round(win ? me.hp : enemy.hp));
   const foe = session.kind === 'local' ? `${loadoutText(enemy.loadout)}（${AI_LEVELS[settings.cpu].zh}）` : `${loadoutText(enemy.loadout)}（區網對手）`;
-  const text = `${win ? '擊破' : '敗給'} ${foe} · ${world.time.toFixed(0)} 秒 · 勝方剩餘 HP ${left}`;
+  const how = koCause === 'meteor' ? (win ? `對手被隕石擊毀（${foe}）` : `被隕石擊毀 · 對手 ${foe}`) : `${win ? '擊破' : '敗給'} ${foe}`;
+  const text = `${how} · ${world.time.toFixed(0)} 秒 · 勝方剩餘 HP ${left}`;
   setPlaying(false);
   mouse.exitLock();
   ko.classList.remove('on');
@@ -567,6 +574,39 @@ function handleEvent(e) {
       break;
     }
     case 'twister': if (Math.hypot(e.x - me.pos.x, e.z - me.pos.z) < 280) showMsg('沙塵龍捲風出現了', 1.2); break;
+    case 'meteorWarn':
+      if (Math.hypot(e.x - me.pos.x, e.z - me.pos.z) < CFG.METEOR.blast + 14) showMsg(e.salvo ? '流星群來襲！離開紅圈' : '隕石來襲！離開紅圈', 1.4);
+      break;
+    case 'meteorHit': {
+      // A big blast: white core, orange fireball, a shock ring along the floor, rock and sparks flying.
+      const l = Math.hypot(e.dx, e.dy, e.dz) || 1;
+      flashes.spawn(e.x, e.y + 2, e.z, 0xfff4e0, 30, 0.16);
+      flashes.spawn(e.x, e.y + 5, e.z, 0xff8a3a, 52, 0.75);
+      flashes.spawn(e.x, e.y + 16, e.z, 0xff5a20, 40, 1.0);
+      flashes.spawn(e.x, e.y + 1, e.z, 0xff7a30, 20, 1.8);                  // the glow of the crater
+      rings.spawn(e.x, e.y + 0.6, e.z, 0xffb070, e.r + 16, 0.75);
+      rings.spawn(e.x, e.y + 0.6, e.z, 0xfff0d0, e.r * 0.8, 0.4);
+      rings.spawn(e.x, e.y + 8, e.z, 0xff9a50, e.r + 4, 0.5, { x: -e.dx / l, y: -e.dy / l, z: -e.dz / l });
+      sparks.burst(e.x, e.y + 2, e.z, 0xffb050, 180, 85, 1.0, 30);
+      sparks.burst(e.x, e.y + 2, e.z, 0xff6a30, 80, 55, 1.4, 22, 0, { x: 0, y: 1, z: 0 }, 0.9);
+      debris.burst(e.x, e.y + 2, e.z, 0x6a625a, 64, 52, 1.8, 40, 0, { x: -e.dx / l * 0.5, y: 1, z: -e.dz / l * 0.5 }, 0.6);
+      smoke.burst(e.x, e.y + 6, e.z, 0x5f5a56, 90, 16, 3.2, -6, 0.8, { x: 0, y: 1, z: 0 }, 1.1);
+      smoke.burst(e.x, e.y + 1, e.z, 0x8a827a, 60, 40, 1.8, -1, 2.2);
+      shakeAt(e.x, e.y, e.z, 1.8);
+      // A burnt patch on whatever floor is under the burst (none against a wall or a rock).
+      if (e.on !== 'rock') {
+        const floor = raycast(world.statics, { x: e.x, y: e.y + 1, z: e.z }, { x: e.x, y: e.y - 6, z: e.z });
+        if (floor) meteorView.scorch(e.x, floor.y, e.z, e.r * 0.85);
+      }
+      if (Math.hypot(e.x - me.pos.x, e.y - me.pos.y, e.z - me.pos.z) < e.r + 20) sflashT = Math.max(sflashT, 0.12);
+      break;
+    }
+    case 'bump': {
+      smoke.burst(e.x, e.y, e.z, 0x8a827a, 10, 8, 0.8, -2, 1.6);
+      debris.burst(e.x, e.y, e.z, 0x7a7068, 6, 12, 0.7, 40);
+      if (e.id === me.id) shake.kick(0.35);
+      break;
+    }
     case 'ko': {
       const f = world.fighters[e.id - 1];
       flashes.spawn(f.pos.x, f.pos.y + 10, f.pos.z, 0xffe0a0, 30, 0.35);
@@ -579,8 +619,10 @@ function handleEvent(e) {
       sflashT = 0.2;
       hitstopT = 0.12;
       if (e.practice) { showMsg(e.id === me.id ? '被擊倒了，馬上站起來' : `假人倒下 · ${CFG.PRACTICE.dummyRevive} 秒後站起來`, 1.6); break; }
-      koResult.textContent = e.by === me.id ? 'WIN' : 'LOSE';
-      ko.classList.toggle('lose', e.by !== me.id);
+      koCause = e.cause || '';
+      const won = (e.winner || e.by) === me.id;
+      koResult.textContent = won ? 'WIN' : 'LOSE';
+      ko.classList.toggle('lose', !won);
       ko.classList.add('on');
       koT = 1.8;                                          // the result screen follows the explosion
       break;
@@ -693,6 +735,8 @@ const loop = createLoop({
     });
     sparks.update(animDt); smoke.update(animDt); debris.update(animDt); flashes.update(animDt); slashes.update(animDt); rings.update(animDt); tracers.update(animDt);
     bolts.sync(world.projectiles, frozen ? 0 : alpha, animDt);
+    // Behind the title screen the rocks drift on, though the match is not running.
+    if (!inBattle && world.meteors) driftRocks(world, frameDt, attractT);
     boards.sync(world.targets, frozen ? 1 : alpha, animDt);
     twisterView.sync(world.twisters, animDt, app.camera, app.renderer);
 
@@ -715,9 +759,12 @@ const loop = createLoop({
       cam.update(frameDt, myPos, look, world.statics, enemyPos);
       shake.apply(app.camera, frameDt);
     }
+    // After the camera: rocks fade where they would hide the player's mech.
+    meteorView.sync(world.meteors, frozen ? 1 : alpha, animDt, app.camera, inBattle ? myPos : null, world.statics);
     sfx.listen(app.camera);
     updateThrusterLoops(sfx, world, inBattle && (playing || !!world.winner));
     updateTwisterLoops(sfx, world, inBattle);
+    updateMeteorLoops(sfx, world, inBattle);
     // Caught in a twister: the picture shudders.
     if (inBattle && me.caught) shake.kick(2.4 * frameDt);
     // Late afternoon into night over the course of the match (?tod=0..1 pins it for screenshots).
@@ -726,6 +773,7 @@ const loop = createLoop({
     sky.set({ top: phase.sky.top, horizon: phase.sky.horizon, bottom: phase.sky.bottom, stars: phase.stars, disc: stageVis.theme.sun ? { dir: phase.sunDir, color: phase.sunColor } : null });
     twisterView.setLight(phase);
     boards.setNight(phase.night);
+    stageVis.animate(performance.now() / 1000);
     sky.update(app.camera);
     app.render();
 
@@ -821,6 +869,10 @@ const loop = createLoop({
       if (hintT > 0) hintT -= frameDt;
       pHint.classList.toggle('on', hintT > 0 && !ui.name);
     }
+    // Meteors: the screen pulses red while this mech stands where one is about to land.
+    let inCircle = false;
+    if (world.meteors && !me.dead) for (const st of world.meteors.strikes) if (Math.hypot(st.ax - me.pos.x, st.az - me.pos.z) < CFG.METEOR.blast + 3) { inCircle = true; break; }
+    danger.classList.toggle('on', inCircle);
     // Twisters: a warning when one is about to pull this mech in.
     if (world.twisters && world.twisters.length) {
       twWarnT -= frameDt;
@@ -863,7 +915,7 @@ window.__skyline = {
     const s = session.sync;
     return { kind: session.kind, tick: world.tick, confirmedTick: s.world.tick, confirmedHash: hashWorld(s.world), stats: { ...s.stats }, hostHashes: Object.fromEntries(hostHashes) };
   },
-  setPlaying, startBattle, startPractice, pause, resume, quit, loop, version: CFG.GAME.version, boards, twisterView,
+  setPlaying, startBattle, startPractice, pause, resume, quit, loop, version: CFG.GAME.version, boards, twisterView, meteorView, sky,
   get practice() { return practice; },
   // Tooling: freeze the simulation and advance it by hand (screenshots of a pose).
   freeze(on) { devFreeze = !!on; },

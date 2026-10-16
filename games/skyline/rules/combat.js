@@ -18,6 +18,7 @@ import { emit } from '../../../engine/core/events.js';
 import { WEAPONS, ARMORS, COMBAT, SLOTS, PRACTICE } from '../config.js';
 import { firstTargetHit, hitTarget, meleeTargets, scoring } from './targets.js';
 import { swirlShot } from './twisters.js';
+import { rockOnSegment, rocksBlock } from './meteors.js';
 
 export function initCombat(f, loadout) {
   f.loadout = { weapon: (loadout && loadout.weapon) || 'normal', armor: (loadout && loadout.armor) || 'normal' };
@@ -46,7 +47,7 @@ const chest = (f) => ({ x: f.pos.x, y: f.pos.y + COMBAT.muzzleHeight, z: f.pos.z
 export function stepLock(world, f, it, dt) {
   const e = enemyOf(world, f);
   if (!e || e.dead || f.dead) { f.lock = 0; f.lockLos = false; return; }
-  f.lockLos = distXZ(f.pos, e.pos) <= COMBAT.lockRange && lineOfSight(world.statics, chest(f), chest(e));
+  f.lockLos = distXZ(f.pos, e.pos) <= COMBAT.lockRange && lineOfSight(world.statics, chest(f), chest(e)) && !rocksBlock(world, chest(f), chest(e));
   if (!f.lock && f.autoLock && f.lockLos) {
     f.lock = e.id; f.lockLost = 0;
     emit(world, 'lock', { id: f.id, auto: true });
@@ -251,27 +252,31 @@ export function stepProjectiles(world, dt) {
     if (world.twisters && world.twisters.length) swirlShot(world, p, dt);
     p.pos.x += p.vel.x * dt; p.pos.y += p.vel.y * dt; p.pos.z += p.vel.z * dt;
     p.ttl -= dt;
-    let tEnd = 1, victim = null, target = null;
+    let tEnd = 1, victim = null, target = null, rock = null;
     const wall = raycast(world.statics, p.prev, p.pos);
     if (wall) tEnd = wall.t;
+    if (world.meteors) {
+      const rk = rockOnSegment(world, p.prev, p.pos, tEnd);       // drifting rocks stop shots
+      if (rk) { tEnd = rk.t; rock = rk.rock; }
+    }
     for (const f of world.fighters) {
       if (f.id === p.owner || f.dead) continue;
       const hb = segmentBody(p.prev, p.pos, f);
-      if (hb && hb.t < tEnd) { tEnd = hb.t; victim = f; }
+      if (hb && hb.t < tEnd) { tEnd = hb.t; victim = f; rock = null; }
     }
     if (world.targets && world.targets.length) {
       const th = firstTargetHit(world, p.prev, p.pos, tEnd);
-      if (th) { tEnd = th.hit.t; target = th; victim = null; }
+      if (th) { tEnd = th.hit.t; target = th; victim = null; rock = null; }
     }
     const out = bd && (p.pos.x < bd.minX || p.pos.x > bd.maxX || p.pos.z < bd.minZ || p.pos.z > bd.maxZ || p.pos.y > bd.ceiling);
-    if (wall || victim || target || p.ttl <= 0 || out) {
+    if (wall || victim || target || rock || p.ttl <= 0 || out) {
       const hx = p.prev.x + (p.pos.x - p.prev.x) * tEnd, hy = p.prev.y + (p.pos.y - p.prev.y) * tEnd, hz = p.prev.z + (p.pos.z - p.prev.z) * tEnd;
       if (victim) {
         const shooter = world.fighters.find((f) => f.id === p.owner);
         applyDamage(world, victim, p.dmg, p.dmgKind, shooter, { stun: p.stun, knock: p.knock, x: hx, y: hy, z: hz });
       }
       if (target) hitTarget(world, target.tg, p.dmg, world.fighters.find((f) => f.id === p.owner), target.hit);
-      emit(world, 'impact', { x: hx, y: hy, z: hz, color: p.color, body: !!victim || !!target, kind: p.kind, look: p.look, dx: p.vel.x, dy: p.vel.y, dz: p.vel.z });
+      emit(world, 'impact', { x: hx, y: hy, z: hz, color: p.color, body: !!victim || !!target, rock: rock ? rock.id : 0, kind: p.kind, look: p.look, dx: p.vel.x, dy: p.vel.y, dz: p.vel.z });
       world.projectiles.splice(i, 1);
     }
   }
@@ -312,7 +317,9 @@ export function applyDamage(world, t, amount, kind, by, o = {}) {
     }
     if (t.melee && kind !== 'light' && !superArmor) t.melee = null;      // a solid hit interrupts a swing
   }
-  const fromYaw = by ? dirToYaw(by.pos.x - t.pos.x, by.pos.z - t.pos.z) : t.yaw;
+  // Where the hit came from: the attacker, or a point (a meteor's burst) for hits without one.
+  const src = by ? by.pos : o.from || null;
+  const fromYaw = src ? dirToYaw(src.x - t.pos.x, src.z - t.pos.z) : t.yaw;
   emit(world, 'hit', { id: t.id, by: by ? by.id : 0, amount: dmg, kind, guard: guarded, broke, superArmor, melee: !!o.melee, final: !!o.final, fromYaw,
     x: o.x == null ? t.pos.x : o.x, y: o.y == null ? t.pos.y + 12 : o.y, z: o.z == null ? t.pos.z : o.z });
   if (t.hp <= 0) {
@@ -322,9 +329,11 @@ export function applyDamage(world, t, amount, kind, by, o = {}) {
       t.revive = PRACTICE.dummyRevive;
       emit(world, 'ko', { id: t.id, by: by ? by.id : 0, practice: true });
     } else {
-      world.winner = by ? by.id : 0;
+      // Knocked out by the stage itself (a meteor): the one still standing wins.
+      const winner = by && by.id !== t.id ? by : enemyOf(world, t);
+      world.winner = winner ? winner.id : 0;
       world.koTick = world.tick;
-      emit(world, 'ko', { id: t.id, by: by ? by.id : 0 });
+      emit(world, 'ko', { id: t.id, by: by ? by.id : 0, winner: world.winner, cause: o.cause || '' });
     }
   }
   return dmg;

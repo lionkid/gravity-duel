@@ -9,16 +9,10 @@
 
 import { emit } from '../../../engine/core/events.js';
 import { angleDiff } from '../../../engine/core/math.js';
+import { hash01, span } from '../../../engine/core/rng.js';
 import { TWISTER as TW } from '../config.js';
 
-// A hash in [0, 1) of two integers.
-export function hash01(a, b) {
-  let h = Math.imul((a >>> 0) ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(((b >>> 0) + 0x632be5ab) >>> 0, 0xc2b2ae35);
-  h = Math.imul(h ^ (h >>> 16), 0x7feb352d);
-  h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-}
-const span = ([lo, hi], u) => lo + (hi - lo) * u;
+export { hash01 };
 
 export function createTwisters(stage, seed) {
   const cfg = stage.hazards && stage.hazards.twisters;
