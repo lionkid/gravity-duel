@@ -15,6 +15,7 @@ import { createTwisters, stepTwisters, twisterForces, caughtVelocity, escapeTwis
 import { createMeteors, stepMeteors, rockContacts } from './meteors.js';
 
 const BUFFERED = ['boost', 'dash', 'attack', 'lock', 'switch1', 'switch2', 'switch3', 'switchNext', 'switchPrev'];
+const SWITCHES = new Set(['switch1', 'switch2', 'switch3', 'switchNext', 'switchPrev']);
 
 // loadouts: { 1: { weapon, armor }, 2: { weapon, armor } }; practice: null | { mode: 'free' | 'timed' }
 // (bullseye targets, a dummy that stands up again, a score).
@@ -74,7 +75,7 @@ export function stepWorld(world, intents, dt) {
 
 function stepFighter(world, f, it, dt, g) {
   // Buffered presses stay valid for a short window so a tap just before landing still counts.
-  for (const a of BUFFERED) f.buf[a] = it.pressed[a] ? MOVE.inputBuffer : Math.max(0, f.buf[a] - dt);
+  for (const a of BUFFERED) f.buf[a] = it.pressed[a] ? (SWITCHES.has(a) ? MOVE.switchBuffer : MOVE.inputBuffer) : Math.max(0, f.buf[a] - dt);
   f.landLag = Math.max(0, f.landLag - dt);
   f.dashCd = Math.max(0, f.dashCd - dt);
 

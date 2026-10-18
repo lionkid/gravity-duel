@@ -64,7 +64,10 @@ export function createLobby({ socket, loadout, onChange, onStart, onPeerLeft, on
     get isHost() { return isHost(); },
     // Is this page served by a Gravity Duel server? Decides whether the LAN button does anything.
     async detectServer() {
-      try { const info = await fetchJson('/api/info'); st.server = info && info.app === 'gravity-duel'; } catch (e) { st.server = false; }
+      // A page opened from the disk (the single-file build) has no server to ask. Either way the answer
+      // comes later, after the caller has finished setting up, as a fetch's would.
+      const served = typeof location !== 'undefined' && /^https?:$/.test(location.protocol);
+      try { const info = served ? await fetchJson('/api/info') : await null; st.server = !!info && info.app === 'gravity-duel'; } catch (e) { st.server = false; }
       change();
       return st.server;
     },

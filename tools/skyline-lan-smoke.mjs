@@ -88,9 +88,11 @@ if (gn.stats.corrections > 5) console.log(`  note: ${gn.stats.corrections} corre
 await guest.keyboard.press('Escape');
 await guest.waitForFunction(() => window.__skyline.ui.name === 'pause', null, { timeout: 30000 });
 const t1 = await host.evaluate(() => window.__skyline.world.tick);
-await host.waitForTimeout(400);
+// Software rendering draws only a frame or two a second here: wait for ticks, not a fixed time.
+await host.waitForFunction((t) => window.__skyline.world.tick >= t + 10, t1, { timeout: 15000 }).catch(() => {});
 const t2 = await host.evaluate(() => window.__skyline.world.tick);
 console.log(`  guest opened the menu; host kept running ${t1} → ${t2}`);
+if (t2 < t1 + 10) errors.push('the host stopped while the guest was in the menu');
 await shot(guest, '25-guest-menu');
 await guest.click('[data-act="quit"]');
 await host.waitForFunction(() => window.__skyline.ui.name === 'lanlost', null, { timeout: 30000 });

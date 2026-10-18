@@ -128,8 +128,9 @@ const mouse = createMouse(canvas);
 const gamepad = createGamepad(CFG.BINDINGS.pad);
 const touchUi = createTouch(document.getElementById('touch'), { toggle: CFG.BINDINGS.touch.toggle, onInteract: () => sfx.unlock() });
 const look = { yaw: 0, pitch: -0.18 };
+// The view turns every rendered frame (frameLook), so the camera is as smooth as the screen refreshes.
 const mapper = createMapper({ keyboard, mouse, gamepad, touch: touchUi, bindings: CFG.BINDINGS, look, sensitivity: CFG.CAMERA.sensitivity * settings.sens,
-  keyLookRate: CFG.CAMERA.keyLookRate, pitchLimits: CFG.CAMERA.pitchLimits });
+  keyLookRate: CFG.CAMERA.keyLookRate, pitchLimits: CFG.CAMERA.pitchLimits, frameLook: true });
 const tpRig = createThirdPersonRig(app.camera, CFG.CAMERA.tp);
 const fpRig = createFirstPersonRig(app.camera, CFG.CAMERA.fp);
 const lockRig = createLockOnRig(app.camera, CFG.CAMERA.lock);
@@ -165,6 +166,8 @@ el('div', 'cdring', crosshair);
 const sflash = el('div', 'sflash', hud);
 const hitmark = el('div', 'hitmark', hud);
 const vignette = el('div', 'vignette', hud);
+// Without a captured pointer, a cursor held at a screen edge keeps turning: arrows show it happening.
+const edgeL = el('div', 'edgehint l', hud), edgeR = el('div', 'edgehint r', hud);
 const danger = el('div', 'danger', hud);              // red pulse while standing where a meteor will land
 const msg = el('div', 'msg', hud);
 const ko = el('div', 'ko', hud);
@@ -191,6 +194,7 @@ function showPopup(x, y, text, cls = '') {
 const showDamage = (x, y, amount, heavy, mine) => showPopup(x, y, String(amount), `${heavy ? 'heavy' : ''} ${mine ? 'me' : ''}`);
 let showDebug = params.has('debug');
 let hitmarkT = 0, vignetteT = 0, msgT = 0, sflashT = 0, denyT = 0, countT = 0, hintT = 0, practiceEndT = 0, twWarnT = 0, koCause = '';
+let freeMouseHinted = false;
 let lastPracticeText = '', lastTimerText = '';
 let lastResult = null;                       // the last time attack, for the result screen
 const showMsg = (text, t = 1.2) => { msg.textContent = text; msg.classList.add('on'); msgT = t; };
@@ -299,11 +303,13 @@ function practiceDummyIntent() {
 
 // ---------------------------------------------------------------- menus, pause and KO
 // `inBattle`: a match is on (or just ended); `playing`: the player's input drives it and the mouse is
-// captured. Pausing releases the mouse and shows the pause screen; closing it captures the mouse again.
+// captured (or, where the page cannot capture it, steers with the free cursor). Pausing releases the
+// mouse and shows the pause screen; closing it captures the mouse again.
 function setPlaying(on) {
   playing = on;
   document.body.classList.toggle('playing', on);
   keyboard.release();
+  mouse.setActive(on);
   if (on) pauseGraceT = 0.3;             // the key that closed a menu must not pause again
 }
 // Solo: the computer plays seat 2.
@@ -427,7 +433,7 @@ const ctx = {
   loadout, cpuLoadout, settings, sfx, version: CFG.GAME.version,
   get cpuLevel() { return settings.cpu; },
   set cpuLevel(v) { settings.cpu = pick(AI_LEVELS, v, 'normal'); },
-  get note() { return mouse.state.supported ? '' : '這裡無法鎖定滑鼠：用方向鍵控制鏡頭與準星，Esc 暫停。'; },
+  get note() { return mouse.state.refused ? '這個頁面不允許鎖定滑鼠：直接移動滑鼠就能轉鏡頭、瞄準，游標推到畫面邊緣會持續轉向。想要完整的滑鼠鎖定，請用下載版（單一 HTML 檔，雙擊開啟）。' : ''; },
   startBattle, resume, quit, startPractice,
   isPractice: () => !!practice,
   practiceBest: (id) => practiceBest[id] || null,
@@ -446,6 +452,7 @@ const ctx = {
     const q = CFG.QUALITY[settings.quality] || CFG.QUALITY.medium;
     mapper.settings.sensitivity = CFG.CAMERA.sensitivity * settings.sens;
     mapper.settings.invertY = !!settings.invertY;
+    mapper.settings.edgeRate = { yaw: 2.6 * settings.sens, pitch: 1.4 * settings.sens };
     sfx.setVolume(settings.volume);
     settings.bloom = q.bloom;
     if (post) post.setEnabled(q.bloom);
@@ -459,8 +466,9 @@ defineScreens(ui, ctx);
 ctx.applySettings();
 ui.show('title');
 canvas.addEventListener('click', () => { if (inBattle && playing) mouse.requestLock(); });
-// Losing the pointer lock (Esc, alt-tab) pauses; so does the tab going to the background.
-mouse.onLockChange((locked) => { if (!locked && playing && mouse.state.supported) pause(); });
+// Losing the pointer lock (Esc, alt-tab) pauses; so does the tab going to the background. A page that
+// refuses the lock never had it, so nothing pauses there: the free cursor steers instead.
+mouse.onLockChange((locked) => { if (!locked && playing) pause(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
 window.addEventListener('keydown', (e) => { if (e.code === 'F3') { showDebug = !showDebug; e.preventDefault(); } });
 
@@ -648,7 +656,7 @@ let frames = 0, fpsTime = 0, fps = 0;
 
 let devFreeze = false;          // tooling: hold the simulation while the renderer keeps drawing
 function simStep(dt) {
-    // Input is sampled every tick so key edges are consumed; the view only follows it in play.
+    // Input is sampled every tick so key edges are consumed (the view itself turns in render).
     const yaw = look.yaw, pitch = look.pitch;
     const intent = mapper.sample(dt);
     if (!playing) { look.yaw = yaw; look.pitch = pitch; }
@@ -750,7 +758,15 @@ const loop = createLoop({
       app.camera.lookAt(0, 30, 0);
       if (app.camera.fov !== CFG.CAMERA.tp.fov) { app.camera.fov = CFG.CAMERA.tp.fov; app.camera.updateProjectionMatrix(); }
       mechs[0].group.visible = true; mechs[1].group.visible = true;
+      mapper.dropLook();
     } else {
+      // Turn the view by this frame's mouse, stick and keys before the camera follows it; zoomed in to
+      // aim, the same hand movement turns less, in step with the narrower view.
+      if (playing && !ui.name) {
+        const fov = me.aiming ? weaponIn(me, 'ranged').zoomFov : CFG.CAMERA.tp.fov;
+        mapper.settings.zoom = Math.tan(THREE.MathUtils.degToRad(fov) / 2) / Math.tan(THREE.MathUtils.degToRad(CFG.CAMERA.tp.fov) / 2);
+        mapper.look(frameDt);
+      } else mapper.dropLook();
       let rig = tpRig;
       if (me.aiming) { fpRig.fov = weaponIn(me, 'ranged').zoomFov; rig = fpRig; }
       else if (me.lock && !enemy.dead) rig = lockRig;
@@ -869,6 +885,11 @@ const loop = createLoop({
       if (hintT > 0) hintT -= frameDt;
       pHint.classList.toggle('on', hintT > 0 && !ui.name);
     }
+    // A page that will not capture the pointer: say once how the free cursor steers, and show the edge turns.
+    if (mouse.state.refused && playing && !freeMouseHinted) { freeMouseHinted = true; showMsg('滑鼠無法鎖定：移動滑鼠轉鏡頭，推到邊緣持續轉向', 3); }
+    const ex = mouse.state.free ? mouse.state.edge.x : 0;
+    edgeL.style.opacity = ex < 0 ? Math.min(1, -ex * 1.4).toFixed(2) : '0';
+    edgeR.style.opacity = ex > 0 ? Math.min(1, ex * 1.4).toFixed(2) : '0';
     // Meteors: the screen pulses red while this mech stands where one is about to land.
     let inCircle = false;
     if (world.meteors && !me.dead) for (const st of world.meteors.strikes) if (Math.hypot(st.ax - me.pos.x, st.az - me.pos.z) < CFG.METEOR.blast + 3) { inCircle = true; break; }

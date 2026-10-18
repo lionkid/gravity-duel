@@ -30,6 +30,7 @@ export const MOVE = {
   landLagSpeed: 40,     // impact speed that costs a landing recovery
   landLag: 0.14,
   inputBuffer: 0.2,     // seconds a press stays valid (covers a weapon draw or the end of a recovery)
+  switchBuffer: 0.6,    // a weapon switch stays queued longer: through a hit stun, a dash or a swing
 };
 
 // Weapon classes: what the player picks. Every mech carries the vulcan plus one ranged and one melee

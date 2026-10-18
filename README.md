@@ -147,7 +147,9 @@ Windows、Mac 與 Node.js 版都可以互相看到房間並對戰。每台電腦
 同一個世界觀的第三人稱 3D 機甲對戰：夜晚的城市、可以跳上的大樓、繞內城一圈的高架道路。設計文件在 `docs/skyline-architecture.md`。
 
 - 執行：`npm run dev`，瀏覽器開 `http://localhost:8080/games/skyline/`（3D 版用 ES modules，必須透過伺服器開啟，不能直接雙擊）。桌面版啟動器會開 `hub.html` 入口頁，列出原版與 Skyline 兩款遊戲。
+- 下載版：`npm run build:standalone` 產生 `build/standalone/GravityDuel-Skyline.html`——整個遊戲（含 Three.js）包成一個約 1.6 MB 的 HTML 檔。下載後雙擊就在 Chrome／Edge／Safari／Firefox 裡玩，不用安裝、不用伺服器、離線可玩（只有字型需要網路，離線時用系統字型）。它是獨立的頁面，所以可以鎖定滑鼠；區網對戰需要伺服器，請用桌面版或 `npm run dev`。
 - 操作：WASD 移動、滑鼠或方向鍵轉鏡頭、Space 跳躍（按住噴射）、Shift/L 衝刺、左鍵/J 攻擊、按住右鍵/K 進第一人稱瞄準、滾輪或 1 / 2 / 3 切武器、Ctrl/; 防禦、F 鎖定切換、Esc 暫停、F3 除錯資訊。滑鼠靈敏度、音量與光暈在「設定」裡調，會記在瀏覽器。
+- 滑鼠：開打時會鎖定滑鼠（點一下畫面也會）。嵌入式頁面（例如 claude.ai 上的版本）不允許鎖定時，直接移動滑鼠一樣能轉鏡頭與瞄準，游標推到畫面邊緣會持續轉向（邊緣出現箭頭）。鏡頭每一幀轉動，高更新率螢幕也順；開鏡瞄準時靈敏度依放大倍率降低。
 - 測試：`npm run test:skyline`（Node 內建 test runner，含 AI 導航、電腦對打的平衡回合賽）。`node tools/skyline-smoke.mjs` 會在 headless Chromium 裡走過選單、打一段、暫停、KO、練習、龍捲風與流星並存截圖（離線也能跑）；`node tools/skyline-balance.mjs 10 90` 印出 9 種配置互打的勝率矩陣。
 - 結構：`engine/` 是可重用的 3D 引擎層（迴圈、輸入、碰撞、鏡頭、繪圖、HUD），`games/skyline/` 是這款遊戲的規則、場景、機體與選單；`vendor/three/` 是固定版本的 Three.js（`npm run vendor` 重新產生）。
 - 戰鬥：開局選武裝（普通／遠程／近戰）與裝甲（標準／防遠程／防近戰），火神砲人人都有。1 / 2 / 3 切換近戰、火神砲、遠程；火神砲是沿身體正前方水平直射的一串小火箭，遠程武器（火箭砲／長距離步槍／手砲）按住右鍵進第一人稱精準射擊，鎖定中直接按攻擊也能腰射鎖定目標；近戰在鎖定狀態下邊衝刺邊舉刀、衝到就揮（第一刀約 0.1–0.2 s），連段會自動跟進，光劍第三段是迴旋斬、巨劍是躍起下劈。被打中有擊退、定格、衝擊環、閃白、鏡頭震動與傷害數字。對手的血條只在有視線時顯示在頭頂。

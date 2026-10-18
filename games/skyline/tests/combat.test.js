@@ -180,6 +180,22 @@ test('switching has a draw time and a cooldown', () => {
   assert.ok(eventsOf(w, 'shot').length > 0, 'fires once drawn');
 });
 
+test('a switch pressed during a hit stun or a dash goes through as soon as it ends', () => {
+  const w = makeWorld({ p1: { z: 60 }, p2: { z: -40 } });
+  const a = w.fighters[0];
+  a.stun = 0.45;                                          // a rifle hit's worth
+  run(w, 1, toRanged);
+  assert.equal(a.active, 'vulcan', 'not while stunned');
+  run(w, Math.round(60 * 0.45) + 2);
+  assert.equal(a.active, 'ranged', 'switched once the stun wore off');
+  const w2 = makeWorld({ p1: { z: 60 }, p2: { z: -40 } });
+  const b = w2.fighters[0];
+  run(w2, 2, (it, i) => { it.pressed.dash = i === 0; it.move.x = 1; it.pressed.switch1 = i === 1; });
+  assert.ok(b.dashTimer > 0 && b.active === 'vulcan', 'dashing');
+  run(w2, Math.round(60 * 0.35));
+  assert.equal(b.active, 'melee', 'switched after the dash');
+});
+
 test('KO ends the fight: the loser is dead, the winner recorded, no more damage', () => {
   const w = makeWorld({ p1: { z: 60 }, p2: { z: -40 } });
   const [a, b] = w.fighters;

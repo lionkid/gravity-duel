@@ -69,7 +69,12 @@ await page.keyboard.up('KeyJ');
 console.log(`  opponent hp after vulcan: ${await page.evaluate(() => window.__skyline.world.fighters[1].hp)}`);
 // Beam from first person.
 await page.keyboard.press('Digit3');
-await page.waitForFunction(() => window.__skyline.world.fighters[0].switchTimer === 0 && window.__skyline.world.fighters[0].active === 'ranged', null, { timeout: 10000 });
+// The software renderer runs only a few ticks a second here: wait generously, and say what happened if not.
+const switched = await page.waitForFunction(() => window.__skyline.world.fighters[0].switchTimer === 0 && window.__skyline.world.fighters[0].active === 'ranged', null, { timeout: 30000 }).then(() => true, () => false);
+if (!switched) {
+  const why = await page.evaluate(() => { const S = window.__skyline, f = S.world.fighters[0]; return { tick: S.world.tick, playing: S.playing, ui: S.ui.name, active: f.active, switchCd: f.switchCd, mouse: { ...S.mouse.state } }; });
+  errors.push(`the switch to the ranged weapon did not happen: ${JSON.stringify(why)}`);
+}
 await page.keyboard.down('KeyK');
 await page.waitForTimeout(400);
 await page.keyboard.press('KeyJ');
@@ -283,6 +288,50 @@ await page.close();
   await ps.screenshot({ path: path.join(outDir, '20-space-burst.png') });
   console.log(`  saved 20-space-burst.png; landed after ${boom.ticks} more ticks`);
   await ps.close();
+}
+
+// An embedded page that refuses the pointer lock (as claude.ai's frame does): the free cursor steers,
+// at the expected rate.
+{
+  const pe = await browser.newPage({ viewport: { width: 960, height: 540 } });
+  pe.on('pageerror', (e) => errors.push(`embed pageerror: ${e.message}`));
+  await pe.route(`http://127.0.0.1:${port}/__embed`, (r) => r.fulfill({ status: 200, contentType: 'text/html',
+    body: '<!doctype html><body style="margin:0"><iframe id="f" sandbox="allow-scripts allow-same-origin" src="/games/skyline/?seed=7&dummy=idle&bloom=0" style="border:0;width:960px;height:540px"></iframe>' }));
+  await pe.goto(`http://127.0.0.1:${port}/__embed`, { timeout: 60000 });
+  const fr = await (await pe.waitForSelector('#f', { state: 'attached', timeout: 90000 })).contentFrame();
+  await fr.waitForFunction(() => window.__skyline && window.__skyline.ui.name === 'title', null, { timeout: 90000 });
+  await fr.click('[data-act="solo"]'); await fr.click('[data-act="pick"][data-level="easy"]'); await fr.click('[data-act="start"]');
+  await fr.waitForFunction(() => window.__skyline.inBattle && window.__skyline.world.tick > 3, null, { timeout: 60000 });
+  await pe.keyboard.press('KeyF');                       // lock-on off, so the mouse drives the camera
+  await pe.mouse.move(480, 270); await pe.waitForTimeout(300);
+  const y0 = await fr.evaluate(() => window.__skyline.look.yaw);
+  for (let i = 1; i <= 10; i++) { await pe.mouse.move(480 + i * 20, 270); await pe.waitForTimeout(30); }
+  await pe.waitForTimeout(300);
+  const em = await fr.evaluate(() => ({ yaw: window.__skyline.look.yaw, ...window.__skyline.mouse.state }));
+  const turned = y0 - em.yaw;
+  console.log(`  embedded frame: lock ${em.refused ? 'refused' : em.locked ? 'granted' : 'not asked'}, free cursor ${em.free}; 200 px turned ${turned.toFixed(3)} rad`);
+  if (!em.free || Math.abs(turned - 200 * 0.0012) > 0.03) errors.push('embedded frame: the free cursor did not steer');
+  await pe.close();
+}
+
+// The single-file download, built into the output folder and opened from the disk.
+{
+  const file = path.join(outDir, 'GravityDuel-Skyline.html');
+  require('child_process').execFileSync(process.execPath, [path.join(root, 'tools', 'skyline-standalone.js'), file]);
+  const pf = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  pf.on('pageerror', (e) => errors.push(`standalone pageerror: ${e.message}`));
+  pf.on('console', (m) => { if (m.type() === 'error') errors.push(`standalone ${m.type()}: ${m.text()}`); });
+  await pf.goto(`file://${file}?seed=7&dummy=idle&stage=desert`, { timeout: 90000 });
+  await pf.waitForFunction(() => window.__skyline && window.__skyline.ui.name === 'title', null, { timeout: 90000 });
+  const lanOff = await pf.evaluate(() => document.querySelector('[data-act="lan"]').disabled);
+  await pf.click('[data-act="solo"]'); await pf.click('[data-act="pick"][data-level="easy"]'); await pf.click('[data-act="start"]');
+  await pf.waitForFunction(() => window.__skyline.inBattle && window.__skyline.world.tick > 10, null, { timeout: 60000 });
+  await pf.waitForTimeout(800);
+  await pf.screenshot({ path: path.join(outDir, '21-standalone.png') });
+  const sa = await pf.evaluate(() => ({ stage: window.__skyline.stageId, locked: window.__skyline.mouse.state.locked }));
+  console.log(`  saved 21-standalone.png; ${(fs.statSync(file).size / 1048576).toFixed(2)} MB file, ${sa.stage}, mouse ${sa.locked ? 'locked' : 'not locked'}, LAN button ${lanOff ? 'off' : 'on'}`);
+  if (!lanOff) errors.push('standalone: the LAN button should be off without a server');
+  await pf.close();
 }
 
 // Postcard views (with bloom): the north ramp and deck from the street, the skyline from above, and the moon.

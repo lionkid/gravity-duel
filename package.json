@@ -13,7 +13,8 @@
     "icon": "node tools/make-icon.mjs",
     "vendor": "node tools/vendor-three.js",
     "build:win": "node tools/build-win.js",
-    "build:mac": "node tools/build-mac.js"
+    "build:mac": "node tools/build-mac.js",
+    "build:standalone": "node tools/skyline-standalone.js"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

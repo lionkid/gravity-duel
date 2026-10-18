@@ -66,3 +66,53 @@ test('invert Y flips mouse, stick and touch pitch together', () => {
   mapper.sample(1 / 60);
   assert.ok(look.pitch > 0, 'inverted: down looks up');
 });
+
+test('frame look: the view turns once per rendered frame, sample() only reads buttons', () => {
+  const f = fakes();
+  const looked = { dx: 0, dy: 0 };
+  f.mouse.consumeLook = () => { const d = { dx: looked.dx, dy: looked.dy }; looked.dx = looked.dy = 0; return d; };
+  f.mouse.consumeButtons = () => ({ wheel: 0, pressed: new Set(['Mouse0']) });
+  f.mouse.downs.add('Mouse0');
+  const look = { yaw: 0, pitch: 0 };
+  const mapper = createMapper({ ...f, bindings: BINDINGS, look, sensitivity: 0.001, frameLook: true });
+  looked.dx = 100;
+  const it = mapper.sample(1 / 60);
+  assert.equal(look.yaw, 0, 'a tick does not turn the view');
+  assert.ok(it.pressed.attack && it.held.attack, 'buttons still come through the tick');
+  mapper.look(1 / 120);
+  assert.ok(Math.abs(look.yaw + 0.1) < 1e-9, '100 px at 0.001 rad/px');
+  f.keyboard.press('ArrowLeft');
+  mapper.look(1 / 120); mapper.look(1 / 120);
+  assert.ok(Math.abs(look.yaw - (-0.1 + 2.4 / 60)) < 1e-9, 'the arrow keys turn by rate, per frame');
+  looked.dx = 50;
+  mapper.dropLook();
+  f.keyboard.release('ArrowLeft');
+  const before = look.yaw;
+  mapper.look(1 / 120);
+  assert.equal(look.yaw, before, 'dropped input does not turn the view later');
+});
+
+test('zoom slows every look input, and a free cursor at an edge keeps turning', () => {
+  const f = fakes();
+  f.mouse.state = { free: true, edge: { x: 0, y: 0 } };
+  const look = { yaw: 0, pitch: 0 };
+  const mapper = createMapper({ ...f, bindings: BINDINGS, look, sensitivity: 0.001 });
+  mapper.settings.zoom = 0.5;
+  f.mouse.dx = 100;
+  mapper.sample(1 / 60);
+  assert.ok(Math.abs(look.yaw + 0.05) < 1e-9, 'half the turn while zoomed');
+  mapper.settings.zoom = 1;
+  look.yaw = 0;
+  f.mouse.state.edge.x = 1;                              // pressed against the right edge
+  for (let i = 0; i < 60; i++) mapper.sample(1 / 60);
+  assert.ok(Math.abs(look.yaw + mapper.settings.edgeRate.yaw) < 1e-6, `a second at the edge turns ${look.yaw.toFixed(3)} rad`);
+  f.mouse.state.edge.x = 0.5; look.yaw = 0;
+  mapper.sample(1);
+  assert.ok(Math.abs(look.yaw + mapper.settings.edgeRate.yaw * 0.25) < 1e-6, 'gentler near the inner side of the band');
+  f.mouse.state.edge.y = -1; look.pitch = 0;
+  mapper.sample(0.1);
+  assert.ok(look.pitch > 0, 'the top edge looks up');
+  f.mouse.state.free = false; look.yaw = 0; look.pitch = 0;
+  mapper.sample(1);
+  assert.equal(look.yaw, 0, 'a captured pointer has no edge');
+});
