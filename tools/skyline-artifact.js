@@ -14,6 +14,7 @@ const body = src.slice(src.indexOf('<body>') + 6, src.indexOf('</body>'));
 head = head.replace(/<meta charset[^>]*>\s*/, '').replace(/<meta name="viewport"[^>]*>\s*/, '').replace(/<link rel="icon"[^>]*>\s*/, '');
 // Import map values must be URLs: "./vendor/..." works, a bare "vendor/..." is silently ignored.
 const page = (head.trim() + '\n' + body.trim() + '\n')
+  .replace('href="../../build/standalone/GravityDuel-Skyline.html"', 'href="./GravityDuel-Skyline.html"')
   .replace(/\.\.\/\.\.\//g, './')
   .replace('src="./main.js"', 'src="./games/skyline/main.js"');
 const importMap = JSON.parse(page.match(/<script type="importmap">\s*([\s\S]*?)<\/script>/)[1]);
@@ -34,5 +35,11 @@ const walk = (dir) => {
 walk(path.join(root, 'engine'));
 walk(path.join(root, 'games', 'skyline'));
 files.push('vendor/three/three.module.js', 'vendor/three/addons.js');
+const list = files.map((p) => ({ path: p }));
+// The single-file build rides along at the root: the zip downloaded from the artifact page cannot run
+// index.html from the disk (file:// refuses module scripts), but it can run this file.
+const single = path.join('build', 'standalone', 'GravityDuel-Skyline.html');
+if (fs.existsSync(path.join(root, single))) list.push({ path: 'GravityDuel-Skyline.html', from: single });
+else console.error(`note: ${single} is missing; run "npm run build:standalone" first so it can be published too`);
 console.log(out);
-console.log(JSON.stringify(files.map((p) => ({ path: p }))));
+console.log(JSON.stringify(list));

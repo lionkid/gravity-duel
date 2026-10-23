@@ -147,7 +147,7 @@ Windows、Mac 與 Node.js 版都可以互相看到房間並對戰。每台電腦
 同一個世界觀的第三人稱 3D 機甲對戰：夜晚的城市、可以跳上的大樓、繞內城一圈的高架道路。設計文件在 `docs/skyline-architecture.md`。
 
 - 執行：`npm run dev`，瀏覽器開 `http://localhost:8080/games/skyline/`（3D 版用 ES modules，必須透過伺服器開啟，不能直接雙擊）。桌面版啟動器會開 `hub.html` 入口頁，列出原版與 Skyline 兩款遊戲。
-- 下載版：`npm run build:standalone` 產生 `build/standalone/GravityDuel-Skyline.html`——整個遊戲（含 Three.js）包成一個約 1.6 MB 的 HTML 檔。下載後雙擊就在 Chrome／Edge／Safari／Firefox 裡玩，不用安裝、不用伺服器、離線可玩（只有字型需要網路，離線時用系統字型）。它是獨立的頁面，所以可以鎖定滑鼠；區網對戰需要伺服器，請用桌面版或 `npm run dev`。
+- 下載版：`npm run build:standalone` 產生 `build/standalone/GravityDuel-Skyline.html`——整個遊戲（含 Three.js）包成一個約 1.6 MB 的 HTML 檔。下載後雙擊就在 Chrome／Edge／Safari／Firefox 裡玩，不用安裝、不用伺服器、離線可玩（只有字型需要網路，離線時用系統字型）。它是獨立的頁面，所以可以鎖定滑鼠；區網對戰需要伺服器，請用桌面版或 `npm run dev`。從線上版（claude.ai）下載的 zip 是「資料夾版」：直接雙擊裡面的 index.html 會因為瀏覽器不讓 file:// 載入模組而空白，頁面會顯示說明與「開啟單檔版」按鈕——zip 裡附了同一份 `GravityDuel-Skyline.html`，開它就能玩；想用資料夾版就在那個資料夾啟動本機伺服器（例如 `python3 -m http.server 8080`）。
 - 操作：WASD 移動、滑鼠或方向鍵轉鏡頭、Space 跳躍（按住噴射）、Shift/L 衝刺、左鍵/J 攻擊、按住右鍵/K 進第一人稱瞄準、滾輪或 1 / 2 / 3 切武器、Ctrl/; 防禦、F 鎖定切換、Esc 暫停、F3 除錯資訊。滑鼠靈敏度、音量與光暈在「設定」裡調，會記在瀏覽器。
 - 滑鼠：開打時會鎖定滑鼠（點一下畫面也會）。嵌入式頁面（例如 claude.ai 上的版本）不允許鎖定時，直接移動滑鼠一樣能轉鏡頭與瞄準，游標推到畫面邊緣會持續轉向（邊緣出現箭頭）。鏡頭每一幀轉動，高更新率螢幕也順；開鏡瞄準時靈敏度依放大倍率降低。鎖定對手時移動滑鼠可以環顧四周（鏡頭繞著自己轉），手一停就慢慢轉回對手。
 - 設定：跑步與衝刺速度各有一條滑桿（顯示 m/s，單人與練習立刻生效，區網用主機的設定）；「按鍵設定」可以把每個動作改成自己的鍵（兩組，滑鼠按鍵與滾輪也行），會記住當作下次的預設；操作說明會跟著顯示目前的鍵。

@@ -389,6 +389,17 @@ await page.close();
   await pf.close();
 }
 
+// The folder version opened from the disk cannot load its module: the page says so instead of staying blank
+// (the refused module logs a console error on this page by design, so it is not watched).
+{
+  const pd = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  await pd.goto(`file://${path.join(root, 'games', 'skyline', 'index.html')}`);
+  const help = await pd.waitForFunction(() => !document.getElementById('needserver').hidden, null, { timeout: 15000 }).then(() => true, () => false);
+  console.log(`  folder version from the disk: help panel ${help ? 'shown' : 'missing'}`);
+  if (!help) errors.push('folder version: opening index.html from the disk should show the help panel');
+  await pd.close();
+}
+
 // Postcard views (with bloom): the north ramp and deck from the street, the skyline from above, and the moon.
 for (const [name, q] of [['06-highway', 'pos=0,0,40&look=3.14159,-0.05'], ['07-skyline', 'pos=-60,180,120&look=0.6,-0.55'], ['13-moon', 'stage=moon&pos=0,0,40&look=3.14159,-0.02'], ['14-moon-sky', 'stage=moon&dummy=idle&pos=480,100,480&look=0.25,0.5']]) {
   const p2 = await browser.newPage({ viewport: { width: 1280, height: 720 } });

@@ -332,7 +332,7 @@ IP 防線：不用 V 字天線、不用紅藍白黃三色配置、不做「嘴�
 
 **Playwright**：載入遊戲頁、等第一幀、檢查 console 無錯誤、截圖存檔供人工看；進入戰鬥並送假輸入 3 秒確認沒有例外。這個環境的 headless Chromium 有 WebGL2，可以跑。冒煙測試也會產生單檔版並從 `file://` 開啟、開一場戰鬥。
 
-**單檔下載版**（`tools/skyline-standalone.js`，`npm run build:standalone`）：把 `index.html`、48 個模組與 vendored Three.js 包成一個約 1.6 MB 的 HTML。每個模組以 base64 `data:` URL 放進 import map；`data:` 模組沒辦法解析相對路徑，所以建置時把相對 import 改寫成 `@skyline/<從 repo 根目錄的路徑>`，由 import map 對應（`three`、`three-addons` 照舊）。雙擊就在瀏覽器開，不需要伺服器（`file://` 不能 fetch 其他模組，內嵌的 `data:` 模組沒有這個問題）；自己是頂層頁面，所以能鎖定滑鼠。沒有伺服器時大廳偵測直接回報「沒有伺服器」，區網按鈕停用；設定與紀錄照樣存在瀏覽器。
+**單檔下載版**（`tools/skyline-standalone.js`，`npm run build:standalone`）：把 `index.html`、48 個模組與 vendored Three.js 包成一個約 1.6 MB 的 HTML。每個模組以 base64 `data:` URL 放進 import map；`data:` 模組沒辦法解析相對路徑，所以建置時把相對 import 改寫成 `@skyline/<從 repo 根目錄的路徑>`，由 import map 對應（`three`、`three-addons` 照舊）。雙擊就在瀏覽器開，不需要伺服器（`file://` 不能 fetch 其他模組，內嵌的 `data:` 模組沒有這個問題）；自己是頂層頁面，所以能鎖定滑鼠。沒有伺服器時大廳偵測直接回報「沒有伺服器」，區網按鈕停用；設定與紀錄照樣存在瀏覽器。反過來，資料夾版的 `index.html` 若從硬碟開啟，模組腳本會被擋下而整頁空白：頁面在 `#boot` 模組的 `error` 事件顯示 `#needserver` 說明面板（原因、單檔版、本機伺服器），按鈕連到單檔版——repo 裡是 `build/standalone/` 的那一份，artifact 版由 `tools/skyline-artifact.js` 改成同目錄的 `GravityDuel-Skyline.html`，並把單檔版列進要一起發布的檔案，所以從線上版下載的 zip 自帶可直接開的檔案。
 
 **效能預算**（1080p、內顯 60 fps）：draw call < 150（建物與窗戶 instancing）、三角形 < 300k、bloom 半解析度、模擬每 tick < 1 ms。畫質等級：低（無後製、無真陰影）／中／高。
 

@@ -59,7 +59,7 @@ let page = src;
 page = swap(page, /<!doctype html>\n/i, `<!doctype html>\n<!-- Gravity Duel: Skyline ${version}${commit ? ` (${commit})` : ''}: single-file build by tools/skyline-standalone.js. Double-click to play. -->\n`);
 page = icon ? swap(page, /<link rel="icon"[^>]*>/, `<link rel="icon" href="${icon}">`) : page.replace(/<link rel="icon"[^>]*>\n?/, '');
 page = swap(page, /<script type="importmap">[\s\S]*?<\/script>/, `<script type="importmap">\n${JSON.stringify({ imports })}\n</script>`);
-page = swap(page, /<script type="module" src="\.\/main\.js"><\/script>/, `<script type="module">import '${nameOf('games/skyline/main.js')}';</script>`);
+page = swap(page, /<script type="module" src="\.\/main\.js" id="boot"><\/script>/, `<script type="module" id="boot">import '${nameOf('games/skyline/main.js')}';</script>`);
 
 fs.mkdirSync(path.dirname(out), { recursive: true });
 fs.writeFileSync(out, page);
