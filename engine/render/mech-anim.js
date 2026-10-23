@@ -1,12 +1,15 @@
 // Procedural animation for mechs built by mech-builder. Works on node names, so any design with the
-// same names (torso, head, thighL/R, shinL/R, armL/R, wingL/R, flameL/R, rifleR, bladeR, auraR)
-// animates the same way.
+// same names (torso, head, thighL/R, shinL/R, armL/R, wingL/R, flameL/R, and the weapons) animates the
+// same way. Weapons: the right hand's `weapon` group holds one model per weapon id (rocket, longrifle,
+// handcannon, saber, greatblade, knife); the one the loadout carries in the slot in use is shown, the
+// others hidden. A melee model carries `edge`, `aura`, `bladeBase` and `bladeTip` inside it. Older
+// designs with a single `rifle` and `blade` still work.
 //
 //   state: { speed, runSpeed, onGround, boosting, dashing, vy, landLag, aiming, aimPitch,
 //            active ('melee' | 'vulcan' | 'ranged'), guard, stun, dead,
 //            melee: null | { stage: 'lunge' | 'windup' | 'active' | 'recovery', progress 0..1,
 //                            style: 'slashR' | 'slashL' | 'overhead' | 'spin' },
-//            bladeScale [x, y, z], gunScale [x, y, z],
+//            rangedId, meleeId (the weapon ids of the loadout),
 //            hitT (seconds since last hit, Infinity if none), hitSide (-1 | 0 | 1), hitHeavy,
 //            firedT (seconds since last shot), firedKind }
 //   mech.flash (seconds) is set by the game when the mech is hit and fades here.
@@ -165,15 +168,16 @@ export function animateMech(mech, state, dt) {
   pose('armL', armL[0], armL[1], armL[2], k); pose('armR', armR[0], armR[1], armR[2], k);
   pose('torso', torso[0], torso[1], torso[2], k); pose('head', head[0], head[1], head[2], k);
 
-  // ---- weapons: show the one in use, scaled for the loadout's weapon
-  const rifle = n('rifleR'), blade = n('bladeR'), aura = n('auraR');
-  if (rifle) {
-    rifle.visible = state.active === 'ranged' && !state.dead;
-    if (state.gunScale) rifle.scale.set(state.gunScale[0], state.gunScale[1], state.gunScale[2]);
-  }
+  // ---- weapons: of the models in the hand, show the one in use
+  const hand = n('weaponR');
+  if (hand) for (const w of hand.children) w.visible = false;
+  const rifle = n((state.rangedId || 'rifle') + 'R') || n('rifleR');
+  const blade = n((state.meleeId || 'blade') + 'R') || n('bladeR');
+  const aura = blade ? blade.getObjectByName('auraR') : null;
+  mech.activeMelee = blade;
+  if (rifle) rifle.visible = state.active === 'ranged' && !state.dead;
   if (blade) {
     blade.visible = state.active === 'melee' && !state.dead;
-    if (state.bladeScale) blade.scale.set(state.bladeScale[0], state.bladeScale[1], state.bladeScale[2]);
     if (melee) {
       // Fixed in the fist: a thrust during the lunge, raised a little so the sweep clears the body; held
       // flat for the spin.

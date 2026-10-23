@@ -9,13 +9,14 @@ import { lerpAngle, dirToAim, distXZ, angleDiff, clamp } from '../../engine/core
 import { createKeyboard } from '../../engine/input/keyboard.js';
 import { createMouse } from '../../engine/input/mouse.js';
 import { createMapper } from '../../engine/input/bindings.js';
+import { cloneBindings, applyBindingDiff, diffBindings, setKey } from '../../engine/input/keymap.js';
 import { createGamepad } from '../../engine/input/gamepad.js';
 import { createTouch } from '../../engine/input/touch.js';
 import { IDLE_INTENT, createIntent, clearIntent } from '../../engine/input/intent.js';
 import { createRenderApp } from '../../engine/render/app.js';
 import { createThirdPersonRig, createFirstPersonRig, createLockOnRig, createCameraBlender, createShake } from '../../engine/render/rigs.js';
 import { buildStageVisual, createEnvironments } from '../../engine/render/world-builder.js';
-import { buildMech } from '../../engine/render/mech-builder.js';
+import { buildMech, disposeMech, validateDesign } from '../../engine/render/mech-builder.js';
 import { animateMech } from '../../engine/render/mech-anim.js';
 import { createBar, el, project } from '../../engine/render/hud.js';
 import { createSky } from '../../engine/render/sky.js';
@@ -31,7 +32,7 @@ import { createSocket } from '../../engine/net/socket.js';
 import { createHostSync, createGuestSync } from '../../engine/net/sync.js';
 import * as CFG from './config.js';
 import { generateCity } from './stages/city.js';
-import { createWorld, stepWorld, cloneWorld, serializeWorld, applySnapshot, hashWorld } from './rules/world.js';
+import { createWorld, stepWorld, cloneWorld, serializeWorld, applySnapshot, hashWorld, normalizeTuning } from './rules/world.js';
 import { weaponIn, meleeOf, rangedOf } from './rules/combat.js';
 import { AX01, withPalette } from './mechs/ax01.js';
 import { createAI, aiIntent, AI_LEVELS } from './ai/brain.js';
@@ -39,6 +40,7 @@ import { RECIPES, soundForEvent, updateThrusterLoops, updateTwisterLoops, update
 import { driftRocks } from './rules/meteors.js';
 import { defineScreens } from './screens.js';
 import { createLobby } from './lobby.js';
+import { createLab } from './lab.js';
 
 const params = new URLSearchParams(location.search);
 const seed = Number(params.get('seed')) || 7;
@@ -47,7 +49,13 @@ const load = (key, fallback) => { try { return Object.assign(fallback, JSON.pars
 const save = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* private mode */ } };
 
 // Settings and the player's loadout live in this browser; the URL can override them (?weapon=&armor=&cpu=).
-const settings = load('skyline.settings', { sens: 1, volume: 0.5, bloom: true, quality: '', invertY: false, fps: false, touch: 'auto', cpu: 'normal', stage: 'city', practiceMode: 'free', practiceDummy: 'stand' });
+const settings = load('skyline.settings', { sens: 1, volume: 0.5, bloom: true, quality: '', invertY: false, fps: false, touch: 'auto', cpu: 'normal', stage: 'city', practiceMode: 'free', practiceDummy: 'stand',
+  run: CFG.TUNING.run.default, dash: CFG.TUNING.dash.default });
+// The speed sliders, as the simulation takes them (inside their ranges, on their steps).
+const tuningOf = () => normalizeTuning({ run: settings.run, dash: settings.dash });
+Object.assign(settings, tuningOf());
+// Keys: the game's defaults with the player's changes on top (saved as the difference).
+const bindings = applyBindingDiff(cloneBindings(CFG.BINDINGS), load('skyline.keys', {}), CFG.ACTIONS);
 if (!CFG.PRACTICE.modes[settings.practiceMode]) settings.practiceMode = 'free';
 if (!CFG.PRACTICE.dummies[settings.practiceDummy]) settings.practiceDummy = 'stand';
 const practiceBest = load('skyline.practiceBest', {});          // stage id → { score, weapon, armor }
@@ -82,7 +90,10 @@ const sky = createSky();
 sky.set(stageVis.theme.sky);
 app.scene.add(sky.mesh);
 const post = params.get('bloom') === '0' ? null : createPost(app, { strength: 0.42, radius: 0.3, threshold: 1.0 });
-const mechs = [buildMech(AX01), buildMech(withPalette(AX01, CFG.PALETTES.crimson, 'ax01-crimson'))];
+// The mech design: the stock AX-01, or the player's own from the mech lab, kept in this browser.
+let design = AX01;
+try { const d = JSON.parse(localStorage.getItem('skyline.mechDesign') || 'null'); if (d && validateDesign(d).length === 0) design = d; } catch (e) { /* stock */ }
+const mechs = [buildMech(design), buildMech(withPalette(design, CFG.PALETTES.crimson, 'crimson'))];
 for (const m of mechs) app.scene.add(m.group);
 const shadows = mechs.map(() => { const s = createBlobShadow(7); app.scene.add(s.mesh); return s; });
 const sparks = createSparks(app.scene, { max: 768, size: 1.4 });
@@ -94,6 +105,19 @@ const rings = createRings(app.scene);
 const tracers = createTracers(app.scene, { life: 0.1 });
 const bolts = createProjectileView(app.scene, { smoke, sparks });
 const trails = mechs.map((m) => createBladeTrail(app.scene, { color: m.design.palette.glow }));
+// Builds both mechs again from a design (the lab's edits), in place, where they stand.
+function rebuildMechs(d) {
+  design = d;
+  mechs.forEach((old, i) => {
+    const m = buildMech(i === 0 ? d : withPalette(d, CFG.PALETTES.crimson, 'crimson'));
+    m.group.position.copy(old.group.position); m.group.rotation.copy(old.group.rotation); m.group.visible = old.group.visible;
+    app.scene.remove(old.group); disposeMech(old);
+    app.scene.add(m.group);
+    mechs[i] = m;
+    trails[i].setColor(m.design.palette.glow);
+  });
+  warmMaterials();
+}
 const boards = createTargetView(app.scene);
 const twisterView = createTwisterView(app.scene, { height: CFG.TWISTER.height });
 const meteorView = createMeteorView(app.scene, { smoke, sparks, blast: CFG.METEOR.blast });
@@ -112,7 +136,6 @@ warmMaterials();
 // Per-mech presentation state the animator reads: time since the last hit / shot.
 const mechFx = mechs.map(() => ({ hitT: Infinity, hitSide: 0, hitHeavy: false, firedT: Infinity, firedKind: '' }));
 let hitstopT = 0;
-const GUN_SCALE = { rocketM: [1.2, 1.2, 1.15], bolt: [0.75, 0.75, 1.6], shell: [1.1, 1.1, 0.7] };
 const FLASH = { vulcan: 1.6, rocket: 4.5, longrifle: 4, handcannon: 3 };
 const TRACER = { vulcan: 7, rocket: 16, longrifle: 320, handcannon: 12 };   // streak length from the muzzle
 const BOOM = { rocketS: 5, rocketM: 12, bolt: 6, shell: 7 };
@@ -129,7 +152,7 @@ const gamepad = createGamepad(CFG.BINDINGS.pad);
 const touchUi = createTouch(document.getElementById('touch'), { toggle: CFG.BINDINGS.touch.toggle, onInteract: () => sfx.unlock() });
 const look = { yaw: 0, pitch: -0.18 };
 // The view turns every rendered frame (frameLook), so the camera is as smooth as the screen refreshes.
-const mapper = createMapper({ keyboard, mouse, gamepad, touch: touchUi, bindings: CFG.BINDINGS, look, sensitivity: CFG.CAMERA.sensitivity * settings.sens,
+const mapper = createMapper({ keyboard, mouse, gamepad, touch: touchUi, bindings, look, sensitivity: CFG.CAMERA.sensitivity * settings.sens,
   keyLookRate: CFG.CAMERA.keyLookRate, pitchLimits: CFG.CAMERA.pitchLimits, frameLook: true });
 const tpRig = createThirdPersonRig(app.camera, CFG.CAMERA.tp);
 const fpRig = createFirstPersonRig(app.camera, CFG.CAMERA.fp);
@@ -201,7 +224,7 @@ const showMsg = (text, t = 1.2) => { msg.textContent = text; msg.classList.add('
 
 // ---------------------------------------------------------------- battle state
 let world, me, enemy, prev, lastSeen = null, ai = null;
-let inBattle = false, playing = false, koT = 0, pauseGraceT = 0, attractT = 0;
+let inBattle = false, playing = false, koT = 0, pauseGraceT = 0, attractT = 0, labOpen = false;
 // Who runs the match: 'local' (the computer opponent), 'host' (seat 1 of a LAN room, authoritative)
 // or 'guest' (seat 2: predicts ahead of the host's confirmed ticks). mySeat is the fighter I control.
 let session = { kind: 'local', sync: null };
@@ -222,9 +245,10 @@ function setStage(id, { fromPeer = false } = {}) {
   if (!inBattle) setupWorld();
   if (!fromPeer) lobby.setStage(id);
 }
-// A fresh world with both mechs at their spawns; also what stands behind the title screen.
-function setupWorld({ matchSeed = seed, loadouts = practice ? { 1: loadout, 2: { weapon: 'normal', armor: 'normal' } } : { 1: loadout, 2: cpuLoadout } } = {}) {
-  world = createWorld({ stage, seed: matchSeed, loadouts, practice });
+// A fresh world with both mechs at their spawns; also what stands behind the title screen. The speed
+// tuning is this player's unless a LAN start brought the host's.
+function setupWorld({ matchSeed = seed, loadouts = practice ? { 1: loadout, 2: { weapon: 'normal', armor: 'normal' } } : { 1: loadout, 2: cpuLoadout }, tuning = tuningOf() } = {}) {
+  world = createWorld({ stage, seed: matchSeed, loadouts, practice, tuning });
   me = world.fighters[mySeat - 1]; enemy = world.fighters[2 - mySeat];
   ai = createAI(settings.cpu, seed * 7 + 3);
   lastView = null;
@@ -334,11 +358,11 @@ function startPractice() {
   if (practice.mode === 'timed') sfx.play('count');
 }
 // LAN: both browsers build the same world from the host's seed and loadouts; seat 1 runs it.
-function startLan({ seed: matchSeed, loadouts, seat, stage: sid }) {
+function startLan({ seed: matchSeed, loadouts, seat, stage: sid, tuning }) {
   if (sid) setStage(sid, { fromPeer: true });
   mySeat = seat;
   session = { kind: seat === 1 ? 'host' : 'guest', sync: null };
-  setupWorld({ matchSeed, loadouts });
+  setupWorld({ matchSeed, loadouts, tuning: tuning || tuningOf() });
   const send = (m) => socket.send(m);
   session.sync = seat === 1
     ? createHostSync({ world, stepWorld, serializeWorld, send })
@@ -435,7 +459,12 @@ const ctx = {
   set cpuLevel(v) { settings.cpu = pick(AI_LEVELS, v, 'normal'); },
   get note() { return mouse.state.refused ? '這個頁面不允許鎖定滑鼠：直接移動滑鼠就能轉鏡頭、瞄準，游標推到畫面邊緣會持續轉向。想要完整的滑鼠鎖定，請用下載版（單一 HTML 檔，雙擊開啟）。' : ''; },
   startBattle, resume, quit, startPractice,
+  openLab,
   isPractice: () => !!practice,
+  // Keys: the live table the mapper reads, edited in place; the difference from the defaults is saved.
+  bindings, defaultBindings: CFG.BINDINGS,
+  setKey(group, action, slot, code) { setKey(bindings, CFG.ACTIONS, group, action, slot, code); save('skyline.keys', diffBindings(bindings, CFG.BINDINGS, CFG.ACTIONS)); },
+  resetKeys() { const fresh = cloneBindings(CFG.BINDINGS); for (const g of Object.keys(CFG.ACTIONS)) for (const a of Object.keys(CFG.ACTIONS[g])) bindings[g][a] = fresh[g][a]; save('skyline.keys', {}); },
   practiceBest: (id) => practiceBest[id] || null,
   practiceSetup() { quit(true); ui.show('title'); ui.show('practice'); },
   lan: lobby.state, lanDraft: '',
@@ -453,6 +482,11 @@ const ctx = {
     mapper.settings.sensitivity = CFG.CAMERA.sensitivity * settings.sens;
     mapper.settings.invertY = !!settings.invertY;
     mapper.settings.edgeRate = { yaw: 2.6 * settings.sens, pitch: 1.4 * settings.sens };
+    // Speeds: at once in a solo or practice match; the host's go out with the next LAN start.
+    const t = tuningOf();
+    Object.assign(settings, t);
+    lobby.setTuning(t);
+    if (world && session.kind === 'local') world.tuning = t;
     sfx.setVolume(settings.volume);
     settings.bloom = q.bloom;
     if (post) post.setEnabled(q.bloom);
@@ -465,6 +499,33 @@ const ctx = {
 defineScreens(ui, ctx);
 ctx.applySettings();
 ui.show('title');
+// The mech lab: the player's mech on a turntable with its design open for editing; its changes rebuild
+// both mechs and stay in this browser until the design is reset.
+const lab = createLab({
+  root: document.getElementById('lab'), canvas, stock: AX01, sfx,
+  design: () => design,
+  onDesign(d) {
+    rebuildMechs(d);
+    lab.setMech(mechs[0]);
+    try { if (d === AX01) localStorage.removeItem('skyline.mechDesign'); else localStorage.setItem('skyline.mechDesign', JSON.stringify(d)); } catch (e) { /* private mode */ }
+  },
+  onClose: closeLab,
+});
+function openLab() {
+  if (inBattle) quit(true);
+  ui.hide();
+  labOpen = true;
+  mouse.setActive(false);
+  lab.open(mechs[0]);
+}
+function closeLab() {
+  if (!labOpen) return;
+  labOpen = false;
+  lab.close();
+  mechs[1].group.visible = true;
+  mechs[0].group.rotation.set(0, world.fighters[0].yaw, 0);
+  ui.show('title');
+}
 canvas.addEventListener('click', () => { if (inBattle && playing) mouse.requestLock(); });
 // Losing the pointer lock (Esc, alt-tab) pauses; so does the tab going to the background. A page that
 // refuses the lock never had it, so nothing pauses there: the free cursor steers instead.
@@ -704,6 +765,7 @@ const loop = createLoop({
     const animDt = frozen ? 0 : frameDt;
     world.fighters.forEach((f, i) => {
       const p = prev[i], m = mechs[i], fx = mechFx[i];
+      if (labOpen && i === 0) { lab.animate(m, frameDt); shadows[i].update(m.group.position, world.statics); return; }
       if (!frozen) {
         m.group.position.set(p.x + (f.pos.x - p.x) * alpha, p.y + (f.pos.y - p.y) * alpha, p.z + (f.pos.z - p.z) * alpha);
         m.group.rotation.y = lerpAngle(p.yaw, f.yaw, alpha);
@@ -724,10 +786,10 @@ const loop = createLoop({
         }
       }
       animateMech(m, {
-        speed: Math.hypot(f.vel.x, f.vel.z), runSpeed: CFG.MOVE.run, onGround: f.onGround, boosting: f.boosting,
+        speed: Math.hypot(f.vel.x, f.vel.z), runSpeed: CFG.MOVE.run * world.tuning.run, onGround: f.onGround, boosting: f.boosting,
         dashing: f.dashTimer > 0, vy: f.vel.y, landLag: f.landLag, aiming: f.aiming, aimPitch: f.aim.pitch,
         active: f.active, melee, guard: f.guard, stun: f.stun, dead: f.dead,
-        bladeScale: mw.bladeScale, gunScale: GUN_SCALE[rangedOf(f).look] || null,
+        rangedId: rangedOf(f).id, meleeId: mw.id,
         hitT: fx.hitT, hitSide: fx.hitSide, hitHeavy: fx.hitHeavy, firedT: fx.firedT, firedKind: fx.firedKind,
       }, animDt);
       // The swing's hop and spin sit on top of the simulated transform.
@@ -736,7 +798,7 @@ const loop = createLoop({
       const sweeping = f.melee && (f.melee.stage === 'active' || (f.melee.stage === 'recovery' && f.melee.t < 0.05));
       if (sweeping && !frozen) {
         m.group.updateMatrixWorld(true);
-        const base = m.nodes.get('bladeBaseR'), tip = m.nodes.get('bladeTipR');
+        const wn = m.activeMelee, base = wn && wn.getObjectByName('bladeBaseR'), tip = wn && wn.getObjectByName('bladeTipR');
         if (base && tip) trails[i].push(base.getWorldPosition(new THREE.Vector3()), tip.getWorldPosition(new THREE.Vector3()));
       }
       trails[i].update(animDt);
@@ -751,7 +813,13 @@ const loop = createLoop({
     // Camera: a slow orbit over the city behind the menus; in play, first person while aiming, the
     // lock-on orbit while locked, free orbit otherwise.
     const myPos = mechs[mySeat - 1].group.position, enemyPos = mechs[2 - mySeat].group.position;
-    if (!inBattle) {
+    if (labOpen) {
+      // The mech lab's turntable.
+      lab.frame(frameDt, app.camera, mechs[0]);
+      if (app.camera.fov !== CFG.CAMERA.tp.fov) { app.camera.fov = CFG.CAMERA.tp.fov; app.camera.updateProjectionMatrix(); }
+      mechs[0].group.visible = true; mechs[1].group.visible = false;
+      mapper.dropLook();
+    } else if (!inBattle) {
       attractT += frameDt;
       const a = attractT * 0.05;
       app.camera.position.set(Math.cos(a) * 300, 175 + Math.sin(attractT * 0.17) * 10, Math.sin(a) * 300);
@@ -937,6 +1005,7 @@ window.__skyline = {
     return { kind: session.kind, tick: world.tick, confirmedTick: s.world.tick, confirmedHash: hashWorld(s.world), stats: { ...s.stats }, hostHashes: Object.fromEntries(hostHashes) };
   },
   setPlaying, startBattle, startPractice, pause, resume, quit, loop, version: CFG.GAME.version, boards, twisterView, meteorView, sky,
+  bindings, lab, openLab, closeLab, get design() { return design; }, get labOpen() { return labOpen; },
   get practice() { return practice; },
   // Tooling: freeze the simulation and advance it by hand (screenshots of a pose).
   freeze(on) { devFreeze = !!on; },

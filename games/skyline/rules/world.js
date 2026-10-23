@@ -8,7 +8,7 @@ import { createBody, moveBody } from '../../../engine/sim/controller.js';
 import { approach, approachXZ, approachAngle, dirToYaw, yawToDir, wrapAngle } from '../../../engine/core/math.js';
 import { emit } from '../../../engine/core/events.js';
 import { IDLE_INTENT } from '../../../engine/input/intent.js';
-import { MOVE, BODY, TWISTER } from '../config.js';
+import { MOVE, BODY, TWISTER, TUNING } from '../config.js';
 import { initCombat, stepLock, stepCombat, stepProjectiles, separateFighters, combatFacing, armorOf, rangedOf } from './combat.js';
 import { createPractice, placeTargets, stepPractice } from './targets.js';
 import { createTwisters, stepTwisters, twisterForces, caughtVelocity, escapeTwister } from './twisters.js';
@@ -18,11 +18,13 @@ const BUFFERED = ['boost', 'dash', 'attack', 'lock', 'switch1', 'switch2', 'swit
 const SWITCHES = new Set(['switch1', 'switch2', 'switch3', 'switchNext', 'switchPrev']);
 
 // loadouts: { 1: { weapon, armor }, 2: { weapon, armor } }; practice: null | { mode: 'free' | 'timed' }
-// (bullseye targets, a dummy that stands up again, a score).
-export function createWorld({ stage, seed = 1, players = 2, loadouts = {}, practice = null }) {
+// (bullseye targets, a dummy that stands up again, a score); tuning: { run, dash } multipliers on the
+// movement numbers (TUNING in the config has the defaults and the ranges).
+export function createWorld({ stage, seed = 1, players = 2, loadouts = {}, practice = null, tuning = null }) {
   const statics = createStatics(stage);
   const world = {
     tick: 0, time: 0, seed, stage, winner: 0, koTick: 0, nextId: 0,
+    tuning: normalizeTuning(tuning),
     fighters: [], projectiles: [], events: [],
     rnd: makeRng(seed),
     statics,
@@ -36,6 +38,16 @@ export function createWorld({ stage, seed = 1, players = 2, loadouts = {}, pract
     world.fighters.push(createFighter(i + 1, sp, loadouts[i + 1]));
   }
   return world;
+}
+
+// Multipliers inside their ranges, the defaults where nothing (or nonsense) was given.
+export function normalizeTuning(t) {
+  const out = {};
+  for (const k of Object.keys(TUNING)) {
+    const r = TUNING[k], v = t && typeof t[k] === 'number' && Number.isFinite(t[k]) ? t[k] : r.default;
+    out[k] = Math.round(Math.min(r.max, Math.max(r.min, Math.round(v / r.step) * r.step)) * 1000) / 1000;
+  }
+  return out;
 }
 
 export function createFighter(id, spawn, loadout) {
@@ -74,6 +86,7 @@ export function stepWorld(world, intents, dt) {
 }
 
 function stepFighter(world, f, it, dt, g) {
+  const T = world.tuning || normalizeTuning(null);
   // Buffered presses stay valid for a short window so a tap just before landing still counts.
   for (const a of BUFFERED) f.buf[a] = it.pressed[a] ? (SWITCHES.has(a) ? MOVE.switchBuffer : MOVE.inputBuffer) : Math.max(0, f.buf[a] - dt);
   f.landLag = Math.max(0, f.landLag - dt);
@@ -113,8 +126,8 @@ function stepFighter(world, f, it, dt, g) {
     f.boosting = false;
   } else if (f.dashTimer > 0) {
     f.dashTimer = Math.max(0, f.dashTimer - dt);
-    f.vel.x = f.dashDir.x * MOVE.dash;
-    f.vel.z = f.dashDir.z * MOVE.dash;
+    f.vel.x = f.dashDir.x * MOVE.dash * T.dash;
+    f.vel.z = f.dashDir.z * MOVE.dash * T.dash;
     f.vel.y = 0;
     f.boosting = false;
   } else if (f.caught && caughtVelocity(world, f)) {
@@ -126,19 +139,20 @@ function stepFighter(world, f, it, dt, g) {
     f.onGround = false;
   } else {
     // Horizontal: snappy on the ground, limited control in the air (no air friction without input).
-    // A twister's pull is wind: it moves the velocity the controls aim for.
-    const run = MOVE.run * speedMul;
+    // A twister's pull is wind: it moves the velocity the controls aim for. The run tuning scales the
+    // speeds and the accelerations alike, so the time to top speed stays the same.
+    const run = MOVE.run * speedMul * T.run, airMax = MOVE.airMax * T.run;
     const w = f.wind, windy = !!w && (w.x !== 0 || w.z !== 0);
     if (f.onGround) {
-      if (windy) approachXZ(f.vel, mv.x * run + w.x, mv.z * run + w.z, (moving ? MOVE.accelGround : MOVE.decelGround) * dt);
-      else approachXZ(f.vel, mv.x * run, mv.z * run, (moving ? MOVE.accelGround : MOVE.decelGround) * dt);
+      if (windy) approachXZ(f.vel, mv.x * run + w.x, mv.z * run + w.z, (moving ? MOVE.accelGround : MOVE.decelGround) * T.run * dt);
+      else approachXZ(f.vel, mv.x * run, mv.z * run, (moving ? MOVE.accelGround : MOVE.decelGround) * T.run * dt);
     } else {
-      if (windy) approachXZ(f.vel, mv.x * MOVE.airMax * speedMul + w.x, mv.z * MOVE.airMax * speedMul + w.z, MOVE.accelAir * dt);
-      else if (moving) approachXZ(f.vel, mv.x * MOVE.airMax * speedMul, mv.z * MOVE.airMax * speedMul, MOVE.accelAir * dt);
+      if (windy) approachXZ(f.vel, mv.x * airMax * speedMul + w.x, mv.z * airMax * speedMul + w.z, MOVE.accelAir * T.run * dt);
+      else if (moving) approachXZ(f.vel, mv.x * airMax * speedMul, mv.z * airMax * speedMul, MOVE.accelAir * T.run * dt);
       // Momentum above the air speed limit (left over from a dash, or a fling) bleeds off instead of gliding forever.
-      const lim = windy ? MOVE.airMax + Math.hypot(w.x, w.z) : MOVE.airMax;
+      const lim = windy ? airMax + Math.hypot(w.x, w.z) : airMax;
       const sp = Math.hypot(f.vel.x, f.vel.z);
-      if (sp > lim && !f.flung) approachXZ(f.vel, f.vel.x / sp * lim, f.vel.z / sp * lim, MOVE.airBleed * dt);
+      if (sp > lim && !f.flung) approachXZ(f.vel, f.vel.x / sp * lim, f.vel.z / sp * lim, MOVE.airBleed * T.run * dt);
     }
     // Jump on a fresh press from the ground; thrust while held in the air.
     if (f.buf.boost > 0 && f.onGround && canAct && !combat.lockMove) {
@@ -250,6 +264,7 @@ export function hashWorld(world) {
   }
   for (const tg of world.targets || []) { mix(tg.alive); mix(tg.hp); mix(tg.yaw); }
   if (world.practice) { mix(world.practice.score); mix(world.practice.shots); }
+  if (world.tuning) { mix(world.tuning.run); mix(world.tuning.dash); }
   mix(world.tick); mix(world.winner); mix(world.rnd.state);
   return h >>> 0;
 }

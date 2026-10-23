@@ -5,6 +5,7 @@
 //     lanBrowse(), lanConnect(base), lanLeave(), lanReady(on), lanAgain(), lanLobby(), lanPickChanged(), isLan(), isHost() }
 
 import { esc } from '../../engine/ui/screens.js';
+import { keySlots, keyName, keyNames, codeFromEvent } from '../../engine/input/keymap.js';
 import * as CFG from './config.js';
 import { AI_LEVELS, AI_ORDER } from './ai/brain.js';
 
@@ -26,12 +27,13 @@ export function defineScreens(ui, ctx) {
         ${btn('solo', '單人對戰', { cls: 'primary' })}
         ${btn('practice', '練習模式 <small>打鏢靶、試武器、練連段</small>')}
         ${btn('lan', `區域網路對戰 <small>${ctx.lan.server ? '同一個網路的兩台電腦' : '需要 Gravity Duel 伺服器（npm run dev 或桌面版）'}</small>`, { attrs: ctx.lan.server ? '' : 'disabled' })}
+        ${btn('lab', '機體工房 <small>預覽、修改機體與武器的造型</small>')}
         ${btn('help', '操作說明')}
         ${btn('settings', '設定')}
       </div>
       ${note(ctx.note)}
-      <p class="foot">v${esc(ctx.version)} · 滑鼠靈敏度與音量在「設定」</p>`),
-    actions: { solo: open('cpu'), practice: open('practice'), lan: () => { ctx.sfx.play('menuOk'); ctx.lanBrowse(); ui.show('lan'); }, help: open('help'), settings: open('settings') },
+      <p class="foot">v${esc(ctx.version)} · 按鍵、速度與音量在「設定」</p>`),
+    actions: { solo: open('cpu'), practice: open('practice'), lan: () => { ctx.sfx.play('menuOk'); ctx.lanBrowse(); ui.show('lan'); }, lab: () => { ctx.sfx.play('menuOk'); ctx.openLab(); }, help: open('help'), settings: open('settings') },
   }));
 
   ui.define('cpu', () => ({
@@ -207,7 +209,7 @@ export function defineScreens(ui, ctx) {
           </div>
         </div>
         <div class="picker stagepick">${pickerRow('stage', CFG.STAGES, '場景', ctx.stageId, lan.seat !== 1 || me)}</div>
-        <p class="pickdesc">${esc(CFG.STAGES[ctx.stageId].desc)}${lan.seat === 1 ? '' : '（由主機選擇）'}</p>
+        <p class="pickdesc">${esc(CFG.STAGES[ctx.stageId].desc)}${lan.seat === 1 ? '' : '（由主機選擇）'}<br>${speedLine(lan.seat === 1 ? lan.tuning : lan.peerTuning, lan.seat === 1)}</p>
         <p class="sub center">${both ? '雙方都準備好了，開始！' : '兩邊都按下準備就開始。主機是座位 1，比賽在它的電腦上計算。'}</p>`;
     }
     return {
@@ -291,7 +293,7 @@ export function defineScreens(ui, ctx) {
 
   ui.define('help', () => ({
     html: panel('', `<h2>操作說明</h2>
-      <dl class="keys">${CFG.KEY_HINTS.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
+      <dl class="keys">${helpRows(ctx.bindings).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
       <ul class="rules">
         <li>火神砲沿身體正前方水平直射，不能瞄準：對手站上樓頂就打不到。連續射擊 3 秒會過熱。</li>
         <li>遠程武器要按住瞄準鍵進第一人稱才能開火；火箭砲與手砲會受重力下墜，步槍不會。</li>
@@ -312,15 +314,18 @@ export function defineScreens(ui, ctx) {
       <div class="settings">
         <label for="sens">滑鼠靈敏度</label><input id="sens" type="range" min="0.3" max="2" step="0.1" value="${ctx.settings.sens}"><span class="val" data-for="sens">${ctx.settings.sens.toFixed(1)}×</span>
         <label for="vol">音量</label><input id="vol" type="range" min="0" max="1" step="0.05" value="${ctx.settings.volume}"><span class="val" data-for="vol">${Math.round(ctx.settings.volume * 100)}%</span>
+        ${['run', 'dash'].map((k) => { const T = CFG.TUNING[k]; return `<label for="${k}">${T.zh}</label><input id="${k}" type="range" min="${T.min}" max="${T.max}" step="${T.step}" value="${ctx.settings[k]}"><span class="val" data-for="${k}">${speedText(k, ctx.settings[k])}</span>`; }).join('')}
+        <label>按鍵</label><div class="seg">${btn('keys', '按鍵設定', { cls: 'small' })}</div><span class="val"></span>
         <label>畫質</label><div class="seg">${CFG.QUALITY_ORDER.map((id) => `<button type="button" class="opt ${ctx.settings.quality === id ? 'on' : ''}" data-act="quality" data-id="${id}" title="${esc(CFG.QUALITY[id].desc)}">${CFG.QUALITY[id].zh}</button>`).join('')}</div><span class="val"></span>
         <label for="inv">Y 軸反轉</label><input id="inv" type="checkbox" ${ctx.settings.invertY ? 'checked' : ''}><span class="val" data-for="inv">${ctx.settings.invertY ? '開' : '關'}</span>
         <label for="fps">顯示 FPS</label><input id="fps" type="checkbox" ${ctx.settings.fps ? 'checked' : ''}><span class="val" data-for="fps">${ctx.settings.fps ? '開' : '關'}</span>
         <label>觸控按鈕</label><div class="seg">${[['auto', '自動'], ['on', '開'], ['off', '關']].map(([id, zh]) => `<button type="button" class="opt ${ctx.settings.touch === id ? 'on' : ''}" data-act="touch" data-id="${id}">${zh}</button>`).join('')}</div><span class="val"></span>
       </div>
-      <p class="foot">畫質「${esc(CFG.QUALITY[ctx.settings.quality].zh)}」：${esc(CFG.QUALITY[ctx.settings.quality].desc)}。${ctx.padConnected ? '已偵測到手把。' : '手把插上就能用。'}設定會保存在這個瀏覽器。</p>
+      <p class="foot">畫質「${esc(CFG.QUALITY[ctx.settings.quality].zh)}」：${esc(CFG.QUALITY[ctx.settings.quality].desc)}。${ctx.padConnected ? '已偵測到手把。' : '手把插上就能用。'}速度在單人與練習中立刻生效，區網用主機的設定。設定會保存在這個瀏覽器。</p>
       <div class="row-end">${btn('back', '返回')}</div>`),
     actions: {
       back, escape: back,
+      keys: open('keys'),
       quality: (d) => { ctx.settings.quality = d.id; ctx.applySettings(); ctx.saveSettings(); ctx.sfx.play('menuMove'); ui.refresh(); },
       touch: (d) => { ctx.settings.touch = d.id; ctx.applySettings(); ctx.saveSettings(); ctx.sfx.play('menuMove'); ui.refresh(); },
     },
@@ -329,12 +334,79 @@ export function defineScreens(ui, ctx) {
       const show = (id, text) => { root.querySelector(`[data-for="${id}"]`).textContent = text; };
       const changed = () => { ctx.applySettings(); ctx.saveSettings(); };
       sens.addEventListener('input', () => { ctx.settings.sens = Number(sens.value); show('sens', `${ctx.settings.sens.toFixed(1)}×`); changed(); });
+      for (const k of ['run', 'dash']) {
+        const el = root.querySelector(`#${k}`);
+        el.addEventListener('input', () => { ctx.settings[k] = Number(el.value); show(k, speedText(k, ctx.settings[k])); changed(); });
+        el.addEventListener('change', () => ctx.sfx.play('menuMove'));
+      }
       vol.addEventListener('input', () => { ctx.settings.volume = Number(vol.value); show('vol', `${Math.round(ctx.settings.volume * 100)}%`); changed(); });
       vol.addEventListener('change', () => ctx.sfx.play('menuMove'));
       inv.addEventListener('change', () => { ctx.settings.invertY = inv.checked; show('inv', inv.checked ? '開' : '關'); changed(); });
       fps.addEventListener('change', () => { ctx.settings.fps = fps.checked; show('fps', fps.checked ? '開' : '關'); changed(); });
     },
   }));
+
+  // ---- Keys: every action with two slots; click a slot and press the key (or mouse button, or wheel).
+  let capture = null;                                  // the listeners of a rebinding in progress
+  const stopCapture = () => { if (capture) { for (const [type, fn] of capture) window.removeEventListener(type, fn, true); capture = null; } };
+  ui.define('keys', () => {
+    const rows = [];
+    for (const g of Object.keys(CFG.ACTIONS)) {
+      for (const [a, label] of Object.entries(CFG.ACTIONS[g])) {
+        const slots = keySlots(ctx.bindings[g][a]);
+        rows.push(`<div class="keyrow"><span class="klabel">${esc(label)}</span>${slots.map((c, i) =>
+          `<button type="button" class="kbtn ${c ? '' : 'empty'}" data-act="bind" data-group="${g}" data-action="${a}" data-slot="${i}" title="點一下再按新的鍵">${esc(keyName(c))}</button>`).join('')}</div>`);
+      }
+    }
+    return {
+      html: panel('', `<h2>按鍵設定</h2>
+        <p class="sub">點一個格子，再按要用的鍵；滑鼠按鍵與滾輪也可以。Backspace 清除、Esc 取消。一個鍵只做一件事：指定給別的動作時會從原來的動作拿掉。手把的配置固定。</p>
+        <div class="keylist">${rows.join('')}</div>
+        <div class="row-end">${btn('reset', '恢復預設')}${btn('back', '返回')}</div>`),
+      actions: {
+        back: () => { stopCapture(); back(); }, escape: () => { stopCapture(); back(); },
+        reset: () => { stopCapture(); ctx.resetKeys(); ctx.sfx.play('menuBack'); ui.refresh(); },
+        bind: (d, el) => {
+          stopCapture();
+          el.classList.add('waiting'); el.textContent = '請按鍵…';
+          const done = (code) => {
+            stopCapture();
+            if (code !== null) { ctx.setKey(d.group, d.action, Number(d.slot), code); ctx.sfx.play('menuOk'); } else ctx.sfx.play('menuBack');
+            ui.refresh();
+          };
+          const onKey = (e) => {
+            e.preventDefault(); e.stopImmediatePropagation();
+            if (e.code === 'Escape') done(null);
+            else if (e.code === 'Backspace' || e.code === 'Delete') done('');
+            else { const c = codeFromEvent(e); if (c) done(c); }
+          };
+          const onMouse = (e) => { e.preventDefault(); e.stopImmediatePropagation(); const c = codeFromEvent(e); if (c) done(c); };
+          const onWheel = (e) => { e.preventDefault(); e.stopImmediatePropagation(); const c = codeFromEvent(e); if (c) done(c); };
+          capture = [['keydown', onKey], ['mousedown', onMouse], ['wheel', onWheel]];
+          // Capture-phase listeners on the window see the press before the menu or the game does.
+          setTimeout(() => { if (capture) for (const [type, fn] of capture) window.addEventListener(type, fn, { capture: true, passive: false }); }, 0);
+        },
+      },
+    };
+  });
+}
+
+// "39 m/s（1.4×）" for a speed slider.
+function speedText(k, v) { const T = CFG.TUNING[k]; return `${Math.round(T.base * v)} m/s（${v.toFixed(2).replace(/0$/, '')}×）`; }
+function speedLine(t, mine) {
+  if (!t) return mine ? '' : '速度：主機的設定（還沒收到）';
+  return `速度：跑步 ${Math.round(CFG.TUNING.run.base * t.run)} m/s、衝刺 ${Math.round(CFG.TUNING.dash.base * t.dash)} m/s${mine ? '（你的設定）' : '（主機的設定）'}`;
+}
+// The help's key list from the live bindings: movement and the keyboard camera on one line each, then
+// every other action, then the fixed lines.
+function helpRows(bindings) {
+  const first = (g, a) => keyName(keySlots(bindings[g][a])[0]);
+  const rows = [
+    ['移動', `${first('move', 'forward')} ${first('move', 'left')} ${first('move', 'back')} ${first('move', 'right')}（前 左 後 右）`],
+    ['鏡頭／準星', `滑鼠；鍵盤 ${first('look', 'up')} ${first('look', 'left')} ${first('look', 'down')} ${first('look', 'right')}`],
+  ];
+  for (const [a, label] of Object.entries(CFG.ACTIONS.actions)) rows.push([label, keyNames(bindings.actions[a])]);
+  return [...rows, ...CFG.KEY_HINTS];
 }
 
 function pickerRow(kind, table, label, value, locked = false) {

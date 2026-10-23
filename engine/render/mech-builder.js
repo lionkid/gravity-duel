@@ -8,8 +8,10 @@
 //   mirror true builds the part twice, mirrored in x; names get an 'R' (x > 0) or 'L' suffix
 //   only   'R' | 'L': inside a mirrored part, build this child on that side only (a weapon in one hand)
 //
-// Named nodes are collected in `nodes` with their rest pose in `rest`, which the animator uses.
-// Models face -Z, matching the simulation's yaw convention, so group.rotation.y = fighter.yaw.
+// Named nodes are collected in `nodes` with their rest pose in `rest`, which the animator uses. Every
+// object remembers the part it was built from in userData.part (the mech lab picks parts by clicking
+// them). Models face -Z, matching the simulation's yaw convention, so group.rotation.y = fighter.yaw.
+// A design is plain JSON: validateDesign() says what is wrong with one before buildMech() would throw.
 
 import * as THREE from 'three';
 
@@ -60,6 +62,8 @@ export function buildMech(design, options = {}) {
       obj = new THREE.Group();
     }
     obj.name = name;
+    obj.userData.part = part;
+    obj.userData.side = suffix.endsWith('L') ? 'L' : suffix.endsWith('R') ? 'R' : '';
     const pos = part.pos || [0, 0, 0], rot = part.rot || [0, 0, 0];
     obj.position.set(pos[0] * sx, pos[1], pos[2]);
     obj.rotation.set(rot[0], rot[1] * sx, rot[2] * sx);
@@ -91,4 +95,39 @@ export function buildMech(design, options = {}) {
 
 export function disposeMech(mech) {
   for (const m of Object.values(mech.materials)) m.dispose();
+}
+
+export const SHAPES = { box: 3, cyl: 3, cone: 2, sphere: 1, group: 0 };     // size numbers each shape needs at least
+export const MATS = ['armor', 'armor2', 'trim', 'glow', 'dark', 'blade', 'aura', 'flame'];
+const PALETTE_KEYS = ['armor', 'armor2', 'trim', 'glow', 'dark'];
+
+// Problems with a design, as strings with the part's path ("parts[2].children[0]"); [] when it is fine.
+export function validateDesign(design) {
+  const out = [];
+  if (!design || typeof design !== 'object') return ['not an object'];
+  if (!design.id || typeof design.id !== 'string') out.push('id: missing');
+  if (!design.palette || typeof design.palette !== 'object') out.push('palette: missing');
+  else for (const k of PALETTE_KEYS) { const v = design.palette[k]; if (!(Number.isInteger(v) && v >= 0 && v <= 0xffffff)) out.push(`palette.${k}: not a colour number`); }
+  if (!Array.isArray(design.parts)) return [...out, 'parts: not a list'];
+  const num = (v) => typeof v === 'number' && Number.isFinite(v);
+  const walk = (part, path, depth) => {
+    if (depth > 12) { out.push(`${path}: nested too deep`); return; }
+    if (!part || typeof part !== 'object') { out.push(`${path}: not an object`); return; }
+    const shape = part.shape || 'group';
+    if (!(shape in SHAPES)) out.push(`${path}.shape: unknown "${shape}"`);
+    else if (shape !== 'group') {
+      if (!Array.isArray(part.size) || part.size.length < SHAPES[shape] || !part.size.every(num)) out.push(`${path}.size: ${shape} needs ${SHAPES[shape]} numbers`);
+      else if (part.size.some((v, i) => i < SHAPES[shape] && v <= 0 && !(shape === 'cyl' && i < 2 && v === 0))) out.push(`${path}.size: must be positive`);
+    }
+    for (const k of ['pos', 'rot', 'scale']) if (part[k] != null && !(Array.isArray(part[k]) && part[k].length === 3 && part[k].every(num))) out.push(`${path}.${k}: needs 3 numbers`);
+    if (part.mat != null && !MATS.includes(part.mat)) out.push(`${path}.mat: unknown "${part.mat}"`);
+    if (part.only != null && part.only !== 'R' && part.only !== 'L') out.push(`${path}.only: must be R or L`);
+    if (part.name != null && typeof part.name !== 'string') out.push(`${path}.name: not text`);
+    if (part.children != null) {
+      if (!Array.isArray(part.children)) out.push(`${path}.children: not a list`);
+      else part.children.forEach((c, i) => walk(c, `${path}.children[${i}]`, depth + 1));
+    }
+  };
+  design.parts.forEach((p, i) => walk(p, `parts[${i}]`, 0));
+  return out;
 }

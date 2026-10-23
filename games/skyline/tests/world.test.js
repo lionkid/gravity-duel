@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateCity, HW } from '../stages/city.js';
-import { createWorld, stepWorld, fighterState } from '../rules/world.js';
+import { createWorld, stepWorld, fighterState, cloneWorld, serializeWorld, applySnapshot, hashWorld } from '../rules/world.js';
 import { createIntent, IDLE_INTENT } from '../../../engine/input/intent.js';
-import { MOVE, STAGES, ARMORS } from '../config.js';
+import { MOVE, STAGES, ARMORS, TUNING } from '../config.js';
 
 const DT = 1 / 60;
 function world(seed = 3) {
@@ -37,7 +37,7 @@ test('running reaches top speed quickly and turns the body toward the movement',
   run(w, 2, (it, i) => { it.pressed.lock = i === 0; });
   // Down the central street (-z), then back up it (+z): the body turns to face each way.
   const f = run(w, 120, (it) => { it.move.z = -1; });
-  const top = MOVE.run * ARMORS[f.loadout.armor].speed;                 // armour sets the speed multiplier
+  const top = MOVE.run * w.tuning.run * ARMORS[f.loadout.armor].speed;  // armour and the run tuning set the speed
   assert.ok(Math.abs(Math.hypot(f.vel.x, f.vel.z) - top) < 1e-6, `top speed ${top}, got ${Math.hypot(f.vel.x, f.vel.z)}`);
   assert.ok(f.pos.z < z0 - 40, `covered ground, got z=${f.pos.z}`);
   assert.ok(f.onGround && Math.abs(f.pos.x) < 1e-6 && f.yaw === 0);
@@ -54,7 +54,7 @@ test('an air dash does not glide at dash speed forever', () => {
   f.pos.y = 150; f.onGround = false;
   run(w, 60, (it, i) => { if (i === 0) it.pressed.dash = true; });   // 0.3 s dash, then 0.5 s of bleed
   const sp = Math.hypot(f.vel.x, f.vel.z);
-  assert.ok(sp <= MOVE.airMax + 1e-6 && sp > 20, `speed settles to the air limit, got ${sp}`);
+  assert.ok(sp <= MOVE.airMax * w.tuning.run + 1e-6 && sp > 20, `speed settles to the air limit, got ${sp}`);
 });
 
 test('a jump with held boost reaches a 60 m roof in under two seconds, then fuel runs out', () => {
@@ -90,7 +90,8 @@ test('dashing bursts forward, hovers, costs fuel and has a cooldown', () => {
   const f = w.fighters[0];
   const z0 = f.pos.z, fuel0 = f.fuel;
   run(w, 18, (it, i) => { it.move.z = -1; if (i === 0) it.pressed.dash = true; });
-  assert.ok(z0 - f.pos.z > 16 && z0 - f.pos.z < 19, `dash distance ${z0 - f.pos.z}`);
+  const burst = MOVE.dash * w.tuning.dash * MOVE.dashTime;
+  assert.ok(Math.abs(z0 - f.pos.z - burst) < 1.5, `dash distance ${z0 - f.pos.z}, expected about ${burst}`);
   assert.ok(Math.abs(fuel0 - f.fuel - MOVE.dashFuel) < 0.05);
   const fuel1 = f.fuel;
   run(w, 6, (it, i) => { it.move.z = -1; if (i === 0) it.pressed.dash = true; });
@@ -104,7 +105,7 @@ test('holding aim slows movement and turns the body to the view', () => {
   const w = world();
   const f = run(w, 120, (it) => { it.move.z = -1; it.held.aim = true; it.aim.yaw = 1.0; it.aim.pitch = 0.3; });
   assert.ok(f.aiming);
-  assert.ok(Math.abs(Math.hypot(f.vel.x, f.vel.z) - MOVE.run * ARMORS[f.loadout.armor].speed * MOVE.aimMoveMul) < 1e-6);
+  assert.ok(Math.abs(Math.hypot(f.vel.x, f.vel.z) - MOVE.run * w.tuning.run * ARMORS[f.loadout.armor].speed * MOVE.aimMoveMul) < 1e-6);
   assert.ok(Math.abs(f.yaw - 1.0) < 1e-6, `body follows the aim yaw, got ${f.yaw}`);
   assert.equal(f.aim.pitch, 0.3);
 });
@@ -146,4 +147,20 @@ test('the same inputs give the same world', () => {
   run(a, 600, script); run(b, 600, script);
   assert.deepEqual(a.fighters.map(fighterState), b.fighters.map(fighterState));
   assert.ok(a.tick === 600);
+});
+
+test('the run and dash tuning scale the speeds, clamp to their ranges and travel in snapshots', () => {
+  const slow = world();
+  const fast = createWorld({ stage: slow.stage, seed: slow.seed, tuning: { run: 2, dash: 2 } });
+  for (const w of [slow, fast]) run(w, 2, (it, i) => { it.pressed.lock = i === 0; });
+  const a = run(slow, 90, (it) => { it.move.z = -1; }), b = run(fast, 90, (it) => { it.move.z = -1; });
+  assert.ok(Math.abs(Math.hypot(b.vel.x, b.vel.z) / Math.hypot(a.vel.x, a.vel.z) - 2 / slow.tuning.run) < 1e-6, 'twice the base speed against the default');
+  assert.deepEqual(createWorld({ stage: slow.stage, seed: 3, tuning: { run: 99, dash: -1 } }).tuning, { run: TUNING.run.max, dash: TUNING.dash.min }, 'clamped');
+  assert.deepEqual(createWorld({ stage: slow.stage, seed: 3, tuning: { run: 'x' } }).tuning, { run: TUNING.run.default, dash: TUNING.dash.default }, 'nonsense falls back');
+  const copy = cloneWorld(fast);
+  assert.deepEqual(copy.tuning, fast.tuning);
+  const fresh = createWorld({ stage: slow.stage, seed: slow.seed });
+  applySnapshot(fresh, JSON.parse(JSON.stringify(serializeWorld(fast))));
+  assert.deepEqual(fresh.tuning, fast.tuning, 'a snapshot carries the tuning');
+  assert.notEqual(hashWorld(slow), hashWorld(fast));
 });

@@ -194,6 +194,62 @@
   .stats dt { color: var(--muted); text-align: right; }
   .stats dd { margin: 0; font-family: var(--mono); text-align: left; }
   .rules.small { font-size: 12px; margin-top: 10px; }
+  /* Key settings: one row per action, two slots. */
+  .keylist { display: grid; gap: 4px; margin: 14px 0 0; max-height: 52vh; overflow: auto; padding-right: 4px; }
+  .keyrow { display: grid; grid-template-columns: 1fr 150px 150px; gap: 6px; align-items: center; font-size: 13px; }
+  .keyrow .klabel { color: var(--muted); }
+  .kbtn { pointer-events: auto; cursor: pointer; font: 13px var(--mono); color: var(--fg); background: rgba(255, 255, 255, 0.05); border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kbtn:hover { border-color: var(--muted); }
+  .kbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .kbtn.empty { color: var(--muted); }
+  .kbtn.waiting { border-color: var(--gold); color: var(--gold); animation: kwait 0.8s ease-in-out infinite alternate; }
+  @keyframes kwait { from { background: rgba(217, 178, 76, 0.08); } to { background: rgba(217, 178, 76, 0.25); } }
+  @media (max-width: 560px) { .keyrow { grid-template-columns: 1fr 110px 110px; } }
+
+  /* The mech lab: panels around the turntable; the canvas between them takes the pointer. */
+  #lab { position: fixed; inset: 0; z-index: 9; pointer-events: none; font-size: 13px; color: var(--fg); }
+  #lab[hidden] { display: none; }
+  #lab .lpanel { position: absolute; pointer-events: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; backdrop-filter: blur(6px); box-sizing: border-box; }
+  #lab .ltop { left: 12px; right: 12px; top: calc(10px + env(safe-area-inset-top, 0px)); display: flex; align-items: center; gap: 8px; padding: 8px 12px; flex-wrap: wrap; }
+  #lab .ltop h2 { font: 16px var(--display); letter-spacing: 0.1em; margin: 0 10px 0 0; }
+  #lab .ltop .lhint { color: var(--muted); font-size: 12px; margin-left: auto; }
+  #lab .ltree { left: 12px; top: calc(62px + env(safe-area-inset-top, 0px)); bottom: calc(70px + env(safe-area-inset-bottom, 0px)); width: 272px; display: flex; flex-direction: column; }
+  #lab .ltree .lhead, #lab .lfields .lhead { padding: 8px 12px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; letter-spacing: 0.08em; display: flex; justify-content: space-between; align-items: center; }
+  #lab .tree { overflow: auto; flex: 1; padding: 6px 0; }
+  #lab .tnode { padding: 3px 10px 3px calc(10px + var(--d, 0) * 14px); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; gap: 6px; align-items: baseline; }
+  #lab .tnode:hover { background: rgba(255, 255, 255, 0.05); }
+  #lab .tnode.sel { background: rgba(88, 224, 255, 0.14); box-shadow: inset 2px 0 0 var(--accent); }
+  #lab .tnode .tname { color: var(--fg); }
+  #lab .tnode .tname.joint { color: var(--gold); }
+  #lab .tnode .tinfo { color: var(--muted); font: 11px var(--mono); }
+  #lab .tnode .tmat { width: 9px; height: 9px; border-radius: 2px; flex: none; border: 1px solid rgba(255, 255, 255, 0.25); }
+  #lab .lfields { right: 12px; top: calc(62px + env(safe-area-inset-top, 0px)); bottom: calc(70px + env(safe-area-inset-bottom, 0px)); width: 300px; display: flex; flex-direction: column; }
+  #lab .fields { overflow: auto; flex: 1; padding: 10px 12px; display: grid; gap: 8px; align-content: start; }
+  #lab .frow { display: grid; grid-template-columns: 52px 1fr; gap: 8px; align-items: center; }
+  #lab .frow > span { color: var(--muted); font-size: 12px; }
+  #lab .fnums { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+  #lab .fnums.four { grid-template-columns: repeat(4, 1fr); }
+  #lab input[type="number"], #lab input[type="text"], #lab select { width: 100%; box-sizing: border-box; font: 12px var(--mono); color: var(--fg); background: rgba(255, 255, 255, 0.05); border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; }
+  #lab input[type="number"] { -moz-appearance: textfield; }
+  #lab input:focus, #lab select:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+  #lab input[type="color"] { width: 100%; height: 26px; border: 1px solid var(--line); border-radius: 4px; background: none; padding: 0; }
+  #lab input[type="checkbox"] { accent-color: var(--accent); }
+  #lab .lbtn { pointer-events: auto; cursor: pointer; font: 12px var(--body); color: var(--fg); background: rgba(255, 255, 255, 0.05); border: 1px solid var(--line); border-radius: 4px; padding: 5px 9px; white-space: nowrap; }
+  #lab .lbtn:hover { border-color: var(--muted); }
+  #lab .lbtn:disabled { opacity: 0.4; cursor: default; }
+  #lab .lbtn.primary { border-color: var(--accent); color: var(--accent); }
+  #lab .lbtn.danger { border-color: rgba(255, 75, 75, 0.6); color: var(--hot); }
+  #lab .lrow { display: flex; gap: 6px; flex-wrap: wrap; }
+  #lab .lbottom { left: 12px; right: 12px; bottom: calc(10px + env(safe-area-inset-bottom, 0px)); display: flex; gap: 14px; padding: 8px 12px; align-items: center; flex-wrap: wrap; }
+  #lab .lbottom label { color: var(--muted); font-size: 12px; display: flex; gap: 6px; align-items: center; }
+  #lab .lbottom select { width: auto; }
+  #lab .lpal { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; padding: 8px 12px; border-top: 1px solid var(--line); }
+  #lab .lpal label { display: grid; gap: 3px; font-size: 11px; color: var(--muted); text-align: center; }
+  #lab .lnote { color: var(--muted); font-size: 12px; padding: 0 12px 8px; }
+  #lab .lnote.bad { color: var(--hot); white-space: pre-wrap; }
+  #lab .lempty { color: var(--muted); padding: 14px 12px; line-height: 1.6; }
+  @media (max-width: 900px) { #lab .ltree { width: 200px; } #lab .lfields { width: 240px; } }
+
   /* Touch controls: a floating stick on the left, camera drag on the right, buttons bottom right. */
   #touch { position: fixed; inset: 0; z-index: 5; touch-action: none; user-select: none; -webkit-user-select: none; }
   #touch[hidden] { display: none; }
@@ -222,6 +278,7 @@
 <canvas id="game"></canvas>
 <div id="hud"></div>
 <div id="screens" hidden></div>
+<div id="lab" hidden></div>
 <div id="touch" hidden>
   <div class="zone left"></div>
   <div class="zone right"></div>

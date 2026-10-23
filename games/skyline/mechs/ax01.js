@@ -60,21 +60,73 @@ export const AX01 = {
         { shape: 'box', size: [2.6, 3.8, 2.8], pos: [0, -6.8, -0.2], mat: 'armor' },          // forearm
         { shape: 'box', size: [2.8, 1.0, 3.0], pos: [0, -5.4, -0.2], mat: 'trim' },
         { shape: 'box', size: [1.8, 1.8, 1.8], pos: [0, -9.3, -0.3], mat: 'dark' },           // hand
-        // Weapons in the right hand; the animator shows the one in use. Both point along -Z (forward).
-        { name: 'rifle', shape: 'group', pos: [0, -9.3, -0.3], only: 'R', children: [               // rocket launcher
-          { shape: 'cyl', size: [1.0, 1.0, 8.0, 12], pos: [0, 0.8, -3.6], rot: [Math.PI / 2, 0, 0], mat: 'armor2' },
-          { shape: 'cyl', size: [1.25, 1.25, 1.2, 12], pos: [0, 0.8, -7.6], rot: [Math.PI / 2, 0, 0], mat: 'trim' },   // muzzle ring
-          { shape: 'cyl', size: [0.7, 0.7, 0.4, 12], pos: [0, 0.8, -8.2], rot: [Math.PI / 2, 0, 0], mat: 'glow' },     // loaded warhead glow
-          { shape: 'box', size: [1.6, 1.8, 2.6], pos: [0, -0.8, -1.6], mat: 'armor' },                                  // magazine
-          { shape: 'box', size: [0.7, 0.9, 2.4], pos: [0, 2.2, -1.4], mat: 'trim' },                                    // sight
-        ] },
-        { name: 'blade', shape: 'group', pos: [0, -9.3, -0.3], only: 'R', children: [               // energy sword
-          { shape: 'cyl', size: [0.5, 0.55, 2.6, 8], pos: [0, 0, 1.2], rot: [Math.PI / 2, 0, 0], mat: 'trim' },        // hilt
-          { shape: 'box', size: [2.8, 2.2, 0.5], pos: [0, 0.1, -0.2], mat: 'armor2' },                                  // guard
-          { name: 'edge', shape: 'box', size: [0.55, 2.0, 13.5], pos: [0, 0.1, -7.6], mat: 'blade' },                  // blade
-          { name: 'aura', shape: 'box', size: [0.06, 3.6, 14.2], pos: [0, 0.1, -7.6], mat: 'aura' },                   // glow sheet
-          { name: 'bladeBase', shape: 'group', pos: [0, 0.1, -0.9] },
-          { name: 'bladeTip', shape: 'group', pos: [0, 0.1, -14.4] },
+        // Weapons in the right hand, one model per weapon id; the animator shows the one the loadout
+        // carries in the slot in use. All point along -Z (forward). A melee model carries `edge` (the lit
+        // blade), `aura` (its glow sheet) and `bladeBase` / `bladeTip` (where the swing trail is drawn).
+        { name: 'weapon', shape: 'group', pos: [0, -9.3, -0.3], only: 'R', children: [
+          // Rocket launcher: a fat tube with a loaded warhead showing, a drum magazine underneath.
+          { name: 'rocket', shape: 'group', children: [
+            { shape: 'cyl', size: [1.15, 1.15, 9.2, 12], pos: [0, 0.9, -4.1], rot: [Math.PI / 2, 0, 0], mat: 'armor2' },
+            { shape: 'cyl', size: [1.45, 1.45, 1.4, 12], pos: [0, 0.9, -8.7], rot: [Math.PI / 2, 0, 0], mat: 'trim' },          // muzzle ring
+            { shape: 'cyl', size: [0.8, 0.8, 0.5, 12], pos: [0, 0.9, -9.4], rot: [Math.PI / 2, 0, 0], mat: 'glow' },            // loaded warhead
+            { shape: 'box', size: [1.8, 2.0, 3.0], pos: [0, -0.9, -1.8], mat: 'armor' },                                         // magazine
+            { shape: 'box', size: [0.8, 1.0, 2.8], pos: [0, 2.5, -1.6], mat: 'trim' },                                           // sight
+            { shape: 'box', size: [2.4, 0.5, 0.5], pos: [0, 0.9, 0.9], mat: 'dark' },                                            // rear grip bar
+          ] },
+          // Long rifle: a slim barrel most of the mech's height, a scope with a lit lens, a shoulder stock.
+          { name: 'longrifle', shape: 'group', children: [
+            { shape: 'box', size: [1.4, 2.0, 4.2], pos: [0, 0.4, 0.1], mat: 'armor2' },                                          // receiver
+            { shape: 'box', size: [1.3, 1.5, 6.0], pos: [0, 0.3, -4.8], mat: 'armor' },                                          // barrel shroud
+            { shape: 'cyl', size: [0.42, 0.42, 14.5, 10], pos: [0, 0.3, -8.6], rot: [Math.PI / 2, 0, 0], mat: 'armor2' },        // barrel
+            { shape: 'cyl', size: [0.65, 0.65, 1.2, 10], pos: [0, 0.3, -15.4], rot: [Math.PI / 2, 0, 0], mat: 'trim' },         // muzzle brake
+            { shape: 'box', size: [0.26, 0.26, 7.0], pos: [0, -0.55, -6.5], mat: 'glow' },                                       // energy rail
+            { shape: 'cyl', size: [0.5, 0.5, 4.6, 10], pos: [0, 2.1, -2.4], rot: [Math.PI / 2, 0, 0], mat: 'dark' },            // scope
+            { shape: 'cyl', size: [0.38, 0.38, 0.2, 10], pos: [0, 2.1, -4.8], rot: [Math.PI / 2, 0, 0], mat: 'glow' },          // lens
+            { shape: 'box', size: [0.4, 1.0, 0.5], pos: [0, 1.4, -1.2], mat: 'trim' }, { shape: 'box', size: [0.4, 1.0, 0.5], pos: [0, 1.4, -3.6], mat: 'trim' },   // scope mounts
+            { shape: 'box', size: [1.2, 1.7, 3.8], pos: [0, 0.1, 3.6], mat: 'armor' },                                           // stock
+            { shape: 'box', size: [0.9, 1.5, 1.0], pos: [0, -1.1, 1.0], mat: 'dark' },                                           // grip
+          ] },
+          // Hand cannon: short and wide, a revolver drum behind the barrel.
+          { name: 'handcannon', shape: 'group', children: [
+            { shape: 'cyl', size: [1.1, 1.1, 4.4, 12], pos: [0, 0.6, -2.6], rot: [Math.PI / 2, 0, 0], mat: 'armor2' },           // barrel
+            { shape: 'cyl', size: [1.4, 1.4, 0.9, 12], pos: [0, 0.6, -5.0], rot: [Math.PI / 2, 0, 0], mat: 'trim' },            // muzzle
+            { shape: 'cyl', size: [0.72, 0.72, 0.3, 12], pos: [0, 0.6, -5.55], rot: [Math.PI / 2, 0, 0], mat: 'glow' },         // bore
+            { shape: 'cyl', size: [1.7, 1.7, 1.8, 8], pos: [0, 0.6, 0.2], rot: [Math.PI / 2, 0, 0], mat: 'armor' },              // drum
+            { shape: 'cyl', size: [1.8, 1.8, 0.3, 8], pos: [0, 0.6, 0.2], rot: [Math.PI / 2, 0, 0], mat: 'trim' },               // drum band
+            { shape: 'box', size: [1.8, 1.4, 3.0], pos: [0, -0.7, -0.4], mat: 'armor2' },                                        // frame
+            { shape: 'box', size: [1.0, 1.9, 1.2], pos: [0, -1.5, 1.2], mat: 'dark' },                                           // grip
+            { shape: 'box', size: [0.6, 0.6, 1.6], pos: [0, 1.9, -1.6], mat: 'trim' },                                           // iron sight
+          ] },
+          // Energy sabre: a straight lit blade with a glow sheet.
+          { name: 'saber', shape: 'group', children: [
+            { shape: 'cyl', size: [0.5, 0.55, 2.6, 8], pos: [0, 0, 1.2], rot: [Math.PI / 2, 0, 0], mat: 'trim' },               // hilt
+            { shape: 'box', size: [2.8, 2.2, 0.5], pos: [0, 0.1, -0.2], mat: 'armor2' },                                         // guard
+            { name: 'edge', shape: 'box', size: [0.55, 2.0, 13.5], pos: [0, 0.1, -7.6], mat: 'blade' },
+            { name: 'aura', shape: 'box', size: [0.06, 3.6, 14.2], pos: [0, 0.1, -7.6], mat: 'aura' },
+            { name: 'bladeBase', shape: 'group', pos: [0, 0.1, -0.9] },
+            { name: 'bladeTip', shape: 'group', pos: [0, 0.1, -14.4] },
+          ] },
+          // Great blade: broad and heavy, a dark fuller down the middle, a two-handed hilt.
+          { name: 'greatblade', shape: 'group', children: [
+            { shape: 'cyl', size: [0.6, 0.65, 4.2, 8], pos: [0, 0, 2.0], rot: [Math.PI / 2, 0, 0], mat: 'trim' },               // long hilt
+            { shape: 'sphere', size: [0.8, 10], pos: [0, 0, 4.3], mat: 'armor2' },                                                // pommel
+            { shape: 'box', size: [4.8, 2.6, 0.9], pos: [0, 0.1, -0.4], mat: 'armor2' },                                         // guard
+            { shape: 'box', size: [5.2, 0.8, 1.0], pos: [0, 0.1, -0.4], mat: 'trim' },
+            { name: 'edge', shape: 'box', size: [0.9, 3.6, 17.0], pos: [0, 0.1, -9.6], mat: 'blade' },
+            { shape: 'box', size: [1.1, 0.5, 12.5], pos: [0, 0.1, -8.4], mat: 'armor2' },                                        // fuller
+            { name: 'aura', shape: 'box', size: [0.06, 5.8, 18.0], pos: [0, 0.1, -9.6], mat: 'aura' },
+            { name: 'bladeBase', shape: 'group', pos: [0, 0.1, -1.0] },
+            { name: 'bladeTip', shape: 'group', pos: [0, 0.1, -18.2] },
+          ] },
+          // Combat knife: short, quick.
+          { name: 'knife', shape: 'group', children: [
+            { shape: 'cyl', size: [0.4, 0.45, 2.2, 8], pos: [0, 0, 1.0], rot: [Math.PI / 2, 0, 0], mat: 'trim' },               // hilt
+            { shape: 'box', size: [2.0, 1.2, 0.4], pos: [0, 0.1, -0.2], mat: 'armor2' },                                         // guard
+            { name: 'edge', shape: 'box', size: [0.4, 1.3, 8.0], pos: [0, 0.1, -4.4], mat: 'blade' },
+            { name: 'aura', shape: 'box', size: [0.05, 2.4, 8.5], pos: [0, 0.1, -4.4], mat: 'aura' },
+            { name: 'bladeBase', shape: 'group', pos: [0, 0.1, -0.6] },
+            { name: 'bladeTip', shape: 'group', pos: [0, 0.1, -8.6] },
+          ] },
         ] },
       ] },
       // Backpack and thruster wings.

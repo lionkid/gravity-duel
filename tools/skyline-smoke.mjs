@@ -290,6 +290,39 @@ await page.close();
   await ps.close();
 }
 
+// The mech lab and the key settings: open the lab, pick a part, change the animation; rebind a key.
+{
+  const pl = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  pl.on('pageerror', (e) => errors.push(`lab pageerror: ${e.message}`));
+  await pl.goto(`http://127.0.0.1:${port}/games/skyline/?seed=7&bloom=0`, { timeout: 90000 });
+  await pl.waitForFunction(() => window.__skyline && window.__skyline.ui.name === 'title', null, { timeout: 90000 });
+  const framesL = (n) => pl.evaluate((k) => new Promise((r) => { let i = 0; const f = () => (++i >= k ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); }), n);
+  await pl.click('[data-act="lab"]');
+  await pl.waitForFunction(() => window.__skyline.labOpen && document.querySelectorAll('#lab .tnode').length > 50, null, { timeout: 30000 });
+  await pl.evaluate(() => { [...document.querySelectorAll('#lab .tnode')].find((r) => r.textContent.startsWith('head')).click(); });
+  await pl.selectOption('#lab .lbottom select >> nth=0', 'slash');
+  await pl.selectOption('#lab .lbottom select >> nth=1', 'melee');
+  await pl.waitForTimeout(800); await framesL(12);
+  await pl.screenshot({ path: path.join(outDir, '22-lab.png') });
+  const labState = await pl.evaluate(() => ({ parts: document.querySelectorAll('#lab .tnode').length, selected: !!document.querySelector('#lab .tnode.sel'), fields: document.querySelectorAll('#lab .fields input, #lab .fields select').length }));
+  console.log(`  saved 22-lab.png; ${labState.parts} parts in the tree, selection ${labState.selected ? 'shown' : 'missing'}, ${labState.fields} fields`);
+  if (!labState.selected || labState.fields < 8) errors.push('lab: the part tree or the fields did not come up');
+  await pl.keyboard.press('Escape');
+  await pl.waitForFunction(() => !window.__skyline.labOpen && window.__skyline.ui.name === 'title', null, { timeout: 10000 });
+  await pl.click('[data-act="settings"]');
+  await pl.click('[data-act="keys"]');
+  await pl.click('.kbtn[data-action="attack"][data-slot="0"]');
+  await pl.waitForTimeout(50);
+  await pl.keyboard.press('KeyF');
+  await pl.waitForTimeout(100);
+  const keys = await pl.evaluate(() => ({ attack: window.__skyline.bindings.actions.attack, lock: window.__skyline.bindings.actions.lock }));
+  await pl.screenshot({ path: path.join(outDir, '23-keys.png') });
+  console.log(`  saved 23-keys.png; attack is now ${JSON.stringify(keys.attack)}, lock ${JSON.stringify(keys.lock)}`);
+  if (keys.attack[0] !== 'KeyF' || keys.lock.includes('KeyF')) errors.push('keys: rebinding attack to F did not take it from lock-on');
+  await pl.evaluate(() => { localStorage.removeItem('skyline.keys'); localStorage.removeItem('skyline.mechDesign'); });
+  await pl.close();
+}
+
 // An embedded page that refuses the pointer lock (as claude.ai's frame does): the free cursor steers,
 // at the expected rate.
 {

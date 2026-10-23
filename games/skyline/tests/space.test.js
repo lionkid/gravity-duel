@@ -289,12 +289,18 @@ function strikeRecord(levels, secs, seed) {
 }
 
 test('the computer steps out of the strike circles; a mech that stands still gets hit', () => {
-  const idle = strikeRecord([null, null], 120, 5);
+  const idle = strikeRecord([null, null], 240, 5);
   const still = idle.hurt[1] + idle.hurt[2], all = idle.aimed[1] + idle.aimed[2];
-  assert.ok(still >= all * 0.5, `standing still: hurt by ${still} of ${all}`);
-  const ai = strikeRecord(['hard', 'normal'], 120, 11);
-  assert.ok(ai.aimed[1] >= 5 && ai.hurt[1] <= ai.aimed[1] * 0.3, `hard: hurt by ${ai.hurt[1]} of ${ai.aimed[1]}`);
-  assert.ok(ai.aimed[2] >= 5 && ai.hurt[2] <= ai.aimed[2] * 0.5, `normal: hurt by ${ai.hurt[2]} of ${ai.aimed[2]}`);
+  assert.ok(all >= 20 && still >= all * 0.5, `standing still: hurt by ${still} of ${all}`);
+  // Two seeds' worth of hard and normal pilots against the same strikes.
+  let aimed = { hard: 0, normal: 0 }, hurt = { hard: 0, normal: 0 };
+  for (const [seed, levels] of [[11, ['hard', 'normal']], [23, ['normal', 'hard']]]) {
+    const r = strikeRecord(levels, 240, seed);
+    levels.forEach((l, i) => { aimed[l] += r.aimed[i + 1]; hurt[l] += r.hurt[i + 1]; });
+  }
+  const idleShare = still / all;
+  assert.ok(aimed.hard >= 20 && hurt.hard / aimed.hard <= idleShare * 0.5, `hard: hurt by ${hurt.hard} of ${aimed.hard} (standing still ${(idleShare * 100).toFixed(0)}%)`);
+  assert.ok(aimed.normal >= 20 && hurt.normal / aimed.normal <= idleShare * 0.75, `normal: hurt by ${hurt.normal} of ${aimed.normal}`);
 });
 
 test('a space match between computers runs, and copies and snapshots agree', () => {

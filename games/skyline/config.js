@@ -33,6 +33,14 @@ export const MOVE = {
   switchBuffer: 0.6,    // a weapon switch stays queued longer: through a hit stun, a dash or a swing
 };
 
+// Match tuning the player can slide in the settings: multipliers on the movement numbers above. Running
+// scales the top speed with the ground and air acceleration and the air speed limit, so the feel stays
+// the same at any speed; dashing scales the burst. A LAN match uses the host's values on both sides.
+export const TUNING = {
+  run: { zh: '跑步速度', default: 1.4, min: 0.8, max: 2.0, step: 0.05, base: MOVE.run },
+  dash: { zh: '衝刺速度', default: 1.3, min: 0.8, max: 2.0, step: 0.05, base: MOVE.dash },
+};
+
 // Weapon classes: what the player picks. Every mech carries the vulcan plus one ranged and one melee
 // weapon; the class decides which ones. Armour trades one damage kind against the other.
 export const WEAPON_CLASSES = {
@@ -61,9 +69,9 @@ export const WEAPONS = {
   // combo lists the swings in order (style: how the body moves, knock: how far the hit throws);
   // reach/width is the hit box ahead. Later swings step in so a combo connects.
   melee: {
-    normal: { id: 'saber', zh: '光劍', kind: 'melee', combo: [{ dmg: 130, windup: 0.1, active: 0.12, recovery: 0.22, style: 'slashR', knock: 8 }, { dmg: 130, windup: 0.09, active: 0.12, recovery: 0.22, style: 'slashL', knock: 8 }, { dmg: 200, windup: 0.16, active: 0.18, recovery: 0.4, style: 'spin', knock: 30 }], lungeRange: 45, lungeDist: 30, lungeSpeed: 220, stepSpeed: 60, reach: 14, width: 14, stun: 0.35, superArmor: false, guardBreak: false, color: 0x58e0ff, bladeScale: [1, 1, 1] },
-    melee: { id: 'greatblade', zh: '巨劍', kind: 'melee', combo: [{ dmg: 300, windup: 0.26, active: 0.2, recovery: 0.5, style: 'overhead', knock: 34 }], lungeRange: 50, lungeDist: 40, lungeSpeed: 210, stepSpeed: 60, reach: 17, width: 18, stun: 0.6, superArmor: true, guardBreak: true, color: 0xff7a3d, bladeScale: [1.8, 1.25, 1.8] },
-    ranged: { id: 'knife', zh: '短刀', kind: 'melee', combo: [{ dmg: 95, windup: 0.06, active: 0.1, recovery: 0.16, style: 'slashR', knock: 6 }, { dmg: 95, windup: 0.06, active: 0.1, recovery: 0.26, style: 'slashL', knock: 16 }], lungeRange: 30, lungeDist: 20, lungeSpeed: 240, stepSpeed: 60, reach: 11, width: 12, stun: 0.2, superArmor: false, guardBreak: false, color: 0xd9b24c, bladeScale: [0.7, 0.6, 0.7] },
+    normal: { id: 'saber', zh: '光劍', kind: 'melee', combo: [{ dmg: 130, windup: 0.1, active: 0.12, recovery: 0.22, style: 'slashR', knock: 8 }, { dmg: 130, windup: 0.09, active: 0.12, recovery: 0.22, style: 'slashL', knock: 8 }, { dmg: 200, windup: 0.16, active: 0.18, recovery: 0.4, style: 'spin', knock: 30 }], lungeRange: 45, lungeDist: 30, lungeSpeed: 220, stepSpeed: 60, reach: 14, width: 14, stun: 0.35, superArmor: false, guardBreak: false, color: 0x58e0ff },
+    melee: { id: 'greatblade', zh: '巨劍', kind: 'melee', combo: [{ dmg: 300, windup: 0.26, active: 0.2, recovery: 0.5, style: 'overhead', knock: 34 }], lungeRange: 50, lungeDist: 40, lungeSpeed: 210, stepSpeed: 60, reach: 17, width: 18, stun: 0.6, superArmor: true, guardBreak: true, color: 0xff7a3d },
+    ranged: { id: 'knife', zh: '短刀', kind: 'melee', combo: [{ dmg: 95, windup: 0.06, active: 0.1, recovery: 0.16, style: 'slashR', knock: 6 }, { dmg: 95, windup: 0.06, active: 0.1, recovery: 0.26, style: 'slashL', knock: 16 }], lungeRange: 30, lungeDist: 20, lungeSpeed: 240, stepSpeed: 60, reach: 11, width: 12, stun: 0.2, superArmor: false, guardBreak: false, color: 0xd9b24c },
   },
 };
 export const SLOTS = ['melee', 'vulcan', 'ranged'];      // the order the 1 / 2 / 3 keys and the HUD use
@@ -200,11 +208,18 @@ export const BINDINGS = {
   touch: { lookSensitivity: 0.006, toggle: ['aim'] },
 };
 
-// Key hints shown on the start panel and in help; label → keys.
+// What each binding is called, for the key settings and the help (in the order they are listed).
+export const ACTIONS = {
+  move: { forward: '前進', back: '後退', left: '左移', right: '右移' },
+  look: { up: '鏡頭向上', down: '鏡頭向下', left: '鏡頭向左', right: '鏡頭向右' },
+  actions: {
+    boost: '跳躍／噴射（按住）', attack: '攻擊', aim: '瞄準（按住，第一人稱）', dash: '衝刺', guard: '防禦', lock: '鎖定切換',
+    switch1: '近戰武器', switch2: '火神砲', switch3: '遠程武器', switchNext: '下一個武器', switchPrev: '上一個武器', rematch: '再戰', pause: '暫停',
+  },
+};
+// Fixed lines of the help, after the keys.
 export const KEY_HINTS = [
-  ['移動', 'W A S D'], ['鏡頭／準星', '滑鼠（或方向鍵）'], ['跳躍／噴射', 'Space（按住）'], ['衝刺', 'Shift / L'],
-  ['攻擊', '左鍵 / J'], ['瞄準（第一人稱，遠程才能開火）', '右鍵 / K（按住）'], ['切換武器', '滾輪 / 1 2 3'],
-  ['防禦', 'Ctrl / ;'], ['鎖定切換', 'F'], ['再戰', 'R'], ['暫停', 'Esc'],
+  ['滑鼠', '鎖定時移動滑鼠可以環顧四周，停下就轉回對手；按住右鍵用準星瞄準'],
   ['手把', '左搖桿移動、右搖桿鏡頭、A 噴射、RT 攻擊、LT 瞄準、B 衝刺、LB 防禦、RB 鎖定、Y 切換、Start 暫停'],
   ['觸控', '左半邊搖桿、右半邊拖曳鏡頭、右下按鈕（瞄準是切換式）'],
 ];

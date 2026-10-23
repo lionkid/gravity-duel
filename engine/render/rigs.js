@@ -3,7 +3,7 @@
 // client and never part of the simulation: the simulation only sees the view angles in the Intent.
 
 import * as THREE from 'three';
-import { aimToDir, yawToDir, dirToYaw, clamp } from '../core/math.js';
+import { aimToDir, yawToDir, dirToYaw, clamp, angleDiff } from '../core/math.js';
 import { raycast } from '../sim/sweep.js';
 
 const tmpTarget = new THREE.Vector3();
@@ -36,16 +36,35 @@ export function createThirdPersonRig(camera, { distance = 42, pivotHeight = 14, 
 // Lock-on: the camera sits behind the player on the line from the target through the player and looks
 // at a point between them, so both mechs stay in frame while the player circles. It writes the view
 // angles it ends up with into `look`, so movement keys and a later first-person aim start from there.
+// Whatever moves `look` between two frames is the player (the mouse, the right stick): that turns the
+// whole camera frame around the player instead of being overwritten, so the player can glance around
+// while locked on; once the input stops for `orbitHold` seconds the view eases back behind the player.
 export function createLockOnRig(camera, { distance = 42, height = 18, farDistance = 30, farHeight = 24, pivotHeight = 14, targetHeight = 12, radius = 2.5, minDistance = 6,
-  smooth = 9, lookWeight = 0.42, fov = 58 } = {}) {
+  smooth = 9, lookWeight = 0.42, fov = 58, orbitYaw = 1.35, orbitPitch = 0.6, orbitHold = 0.35, orbitReturn = 3 } = {}) {
   const pos = new THREE.Vector3();
   const flat = { x: 0, z: 1 };
   let first = true;
   const fwd = new THREE.Vector3();
+  const orbit = { yaw: 0, pitch: 0, idle: 0 };
+  const written = { yaw: NaN, pitch: NaN };            // the look angles this rig set last frame
+  const rel = new THREE.Vector3(), lookRel = new THREE.Vector3(), right = new THREE.Vector3(), axisY = new THREE.Vector3(0, 1, 0);
+  const qYaw = new THREE.Quaternion(), qPitch = new THREE.Quaternion();
   return {
-    fov,
-    reset() { first = true; },
+    fov, orbit,
+    reset() { first = true; orbit.yaw = 0; orbit.pitch = 0; orbit.idle = 0; written.yaw = NaN; },
     update(dt, player, look, statics, target) {
+      // The player's nudge since last frame; it decays once the hand rests.
+      if (!Number.isNaN(written.yaw)) {
+        const dy = angleDiff(written.yaw, look.yaw), dp = look.pitch - written.pitch;
+        if (Math.abs(dy) > 1e-7 || Math.abs(dp) > 1e-7) {
+          orbit.yaw = clamp(orbit.yaw + dy, -orbitYaw, orbitYaw);
+          orbit.pitch = clamp(orbit.pitch + dp, -orbitPitch, orbitPitch);
+          orbit.idle = 0;
+        } else {
+          orbit.idle += dt;
+          if (orbit.idle > orbitHold) { const k = 1 - Math.exp(-orbitReturn * dt); orbit.yaw -= orbit.yaw * k; orbit.pitch -= orbit.pitch * k; }
+        }
+      }
       const pivot = { x: player.x, y: player.y + pivotHeight, z: player.z };
       const tgt = { x: target.x, y: target.y + targetHeight, z: target.z };
       const dx = player.x - target.x, dz = player.z - target.z, d = Math.hypot(dx, dz);
@@ -65,11 +84,27 @@ export function createLockOnRig(camera, { distance = 42, height = 18, farDistanc
       }
       if (first) pos.set(want.x, want.y, want.z); else pos.lerp(new THREE.Vector3(want.x, want.y, want.z), 1 - Math.exp(-smooth * dt));
       first = false;
-      camera.position.copy(pos);
-      camera.lookAt(tmpTarget.set(pivot.x + (tgt.x - pivot.x) * lookWeight, pivot.y + (tgt.y - pivot.y) * lookWeight, pivot.z + (tgt.z - pivot.z) * lookWeight));
+      // The orbit turns the smoothed camera and its look point rigidly around the player: yaw about the
+      // vertical, pitch about the camera's right-hand axis (mouse up looks up, so the camera drops).
+      rel.set(pos.x - pivot.x, pos.y - pivot.y, pos.z - pivot.z);
+      lookRel.set((tgt.x - pivot.x) * lookWeight, (tgt.y - pivot.y) * lookWeight, (tgt.z - pivot.z) * lookWeight);
+      if (orbit.yaw || orbit.pitch) {
+        qYaw.setFromAxisAngle(axisY, orbit.yaw);
+        right.set(flat.z, 0, -flat.x).applyQuaternion(qYaw);        // to the right of the view direction (-flat): (-flat) × up
+        qPitch.setFromAxisAngle(right, orbit.pitch);
+        rel.applyQuaternion(qYaw).applyQuaternion(qPitch);
+        lookRel.applyQuaternion(qYaw).applyQuaternion(qPitch);
+        if (statics) {
+          const hit = raycast(statics, pivot, { x: pivot.x + rel.x, y: pivot.y + rel.y, z: pivot.z + rel.z }, radius);
+          if (hit) rel.multiplyScalar(Math.max(minDistance / rel.length(), hit.t - 0.5 / rel.length()));
+        }
+      }
+      camera.position.set(pivot.x + rel.x, pivot.y + rel.y, pivot.z + rel.z);
+      camera.lookAt(tmpTarget.set(pivot.x + lookRel.x, pivot.y + lookRel.y, pivot.z + lookRel.z));
       camera.getWorldDirection(fwd);
       look.yaw = dirToYaw(fwd.x, fwd.z);
       look.pitch = Math.asin(clamp(fwd.y, -1, 1));
+      written.yaw = look.yaw; written.pitch = look.pitch;
     },
   };
 }
