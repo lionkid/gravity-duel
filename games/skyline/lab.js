@@ -2,15 +2,19 @@
 // editing. The part tree on the left, the selected part's fields on the right, animation and weapon
 // pickers along the bottom. Every edit rebuilds the mech at once (through onDesign, which also keeps
 // the design in the browser); "reset" hands the stock design back. Parts can be picked by clicking
-// them in the view. Pure DOM and Three.js here; the game owns the scene, the mech and the camera and
-// calls frame() and animate() each frame while the lab is open.
+// them in the view, and moved, turned and resized right there: a selected part carries a gizmo (arrows,
+// rings or cubes, W / E / R), and dragging the part itself slides it across the screen. During a drag
+// only the live objects move; the design is rebuilt once the button comes up. Pure DOM and Three.js
+// here; the game owns the scene, the mech and the camera and calls frame() and animate() each frame
+// while the lab is open.
 //
 //   const lab = createLab({ root, canvas, stock, design (getter), onDesign(design), onClose, sfx });
 //   lab.open(mech); lab.frame(dt, camera, mech); lab.animate(mech, dt); lab.close();
 
 import * as THREE from 'three';
 import { animateMech } from '../../engine/render/mech-anim.js';
-import { validateDesign, SHAPES, MATS } from '../../engine/render/mech-builder.js';
+import { validateDesign, partGeometry, SHAPES, MATS } from '../../engine/render/mech-builder.js';
+import { createGizmo, rayAxisParam, rayPlanePoint, planeBasis, angleInPlane, angleDelta, eulerAxes } from '../../engine/render/gizmo.js';
 import { WEAPONS, WEAPON_CLASSES, MOVE } from './config.js';
 
 const JOINTS = new Set(['torso', 'head', 'arm', 'thigh', 'shin', 'wing', 'flame', 'weapon', 'vulcan', 'hips']);
@@ -21,6 +25,8 @@ const SIZE_LABELS = { box: ['寬', '高', '深'], cyl: ['上半徑', '下半徑'
 const ANIMS = { idle: '站立', run: '跑步', boost: '噴射', aim: '瞄準', guard: '防禦', slash: '揮砍', hit: '受擊' };
 const SLOTS_ZH = { melee: '近戰', vulcan: '火神砲', ranged: '遠程' };
 const DEG = 180 / Math.PI;
+const MODES = { move: ['移動', 'W'], rotate: ['旋轉', 'E'], size: ['尺寸', 'R'] };
+const SNAP = { move: 0.25, rotate: Math.PI / 12, size: 0.25 };
 
 const el = (tag, cls, parent, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; if (parent) parent.appendChild(e); return e; };
 const hex = (n) => `#${(n >>> 0).toString(16).padStart(6, '0')}`;
@@ -29,7 +35,12 @@ const round = (v, d = 2) => Math.round(v * 10 ** d) / 10 ** d;
 export function createLab({ root, canvas, stock, design: getDesign, onDesign, onClose, sfx = null }) {
   let design = null;                  // the design being edited (a copy of the stock one once anything changes)
   let selected = null;                // the selected part object
+  let selectedObj = null;             // the object of it the player clicked (one of its sides), if any
   let mech = null;
+  let mode = 'move';                  // what the gizmo does: 'move' | 'rotate' | 'size'
+  let drag = null;                    // a drag in progress: { kind: 'cam' | 'move' | 'free' | 'rotate' | 'size', ... }
+  const gizmo = createGizmo();
+  const stockJson = JSON.stringify(stock);
   const undo = [], redo = [];
   const ui = {};
   const cam = { yaw: 0.6, pitch: 0.28, dist: 48, idle: 0, auto: true, drag: null };
@@ -50,7 +61,14 @@ export function createLab({ root, canvas, stock, design: getDesign, onDesign, on
   ui.file = document.createElement('input'); ui.file.type = 'file'; ui.file.accept = 'application/json,.json'; ui.file.hidden = true; top.appendChild(ui.file);
   ui.file.addEventListener('change', () => { const f = ui.file.files && ui.file.files[0]; if (f) importJson(f); ui.file.value = ''; });
   topBtn('恢復預設機體', 'danger', () => { if (confirm('放棄所有修改，回到原本的 AX-01？')) setDesign(stock, { stock: true }); });
-  el('span', 'lhint', top, '拖曳轉動 · 滾輪縮放 · 點零件選取 · Esc 關閉');
+  const modes = el('span', 'lmodes', top);
+  ui.modes = {};
+  for (const [k, [zh, key]] of Object.entries(MODES)) {
+    const b = el('button', `lbtn ${k === mode ? 'on' : ''}`, modes); b.type = 'button'; b.innerHTML = `${zh}<small>${key}</small>`; b.title = `拖曳零件的方式（${key}）`;
+    b.addEventListener('click', () => { click(); setMode(k); });
+    ui.modes[k] = b;
+  }
+  el('span', 'lhint', top, '點零件選取 · 拖零件／箭頭移動、環旋轉、方塊改尺寸（Shift 吸附）· 右鍵拖曳轉鏡頭 · 滾輪縮放 · Esc 關閉');
   topBtn('關閉', 'primary', () => onClose && onClose());
 
   const treePanel = el('div', 'lpanel ltree', root);
@@ -100,10 +118,10 @@ export function createLab({ root, canvas, stock, design: getDesign, onDesign, on
     if (design === stock) { const copy = structuredClone(stock); copy.id = 'custom'; return copy; }
     return design;
   }
-  // An edit of the current design: record for undo, rebuild, redraw. `fn(design, part)` edits in
-  // place; `part` is the selected part *of the design being edited*, since the first edit of the stock
-  // design moves to a copy (the fields' own closures would still point at the stock part).
-  function edit(fn, { redraw = true } = {}) {
+  // Starts an edit: records the design for undo and makes it editable (the first edit of the stock
+  // design moves to a copy, with the selection moved to the copy's part at the same path). Returns
+  // the selected part of the design being edited.
+  function beginEdit() {
     const d = editable();
     if (d !== design) {
       const path = selected ? pathOf(design, selected) : null;
@@ -111,7 +129,13 @@ export function createLab({ root, canvas, stock, design: getDesign, onDesign, on
       design = d;
       selected = path ? partAt(design, path) : null;
     } else { undo.push(JSON.stringify(design)); if (undo.length > 60) undo.shift(); redo.length = 0; }
-    fn(design, selected);
+    return selected;
+  }
+  // An edit of the current design in one go: `fn(design, part)` edits in place (part: the selected
+  // part of the design being edited, not the fields' closure's), then rebuild and redraw.
+  function edit(fn, { redraw = true } = {}) {
+    const part = beginEdit();
+    fn(design, part);
     onDesign(design);
     if (redraw) renderAll(); else { renderTree(); refreshHighlight(); buttons(); }
   }
@@ -119,10 +143,12 @@ export function createLab({ root, canvas, stock, design: getDesign, onDesign, on
   function history(from, to) {
     if (!from.length) return;
     to.push(JSON.stringify(design));
-    const d = JSON.parse(from.pop());
+    const s = from.pop();
+    const d = s === stockJson ? stock : JSON.parse(s);          // back at the stock: the stock itself
     const path = selected ? pathOf(design, selected) : null;
     design = d;
     selected = path ? partAt(design, path) : null;
+    selectedObj = null;
     onDesign(design);
     renderAll();
   }
@@ -213,7 +239,7 @@ export function createLab({ root, canvas, stock, design: getDesign, onDesign, on
         const isJoint = part.name && (JOINTS.has(part.name) || WEAPON_IDS.has(part.name));
         el('span', `tname ${isJoint ? 'joint' : ''}`, row, part.name || SHAPE_ZH[shape] || shape);
         el('span', 'tinfo', row, part.name ? SHAPE_ZH[shape] + (part.mirror ? ' ×2' : '') : (part.size ? part.size.slice(0, 3).map((v) => round(v, 1)).join('×') : '') + (part.mirror ? ' ×2' : ''));
-        row.addEventListener('click', () => { selected = part; renderAll(); });
+        row.addEventListener('click', () => { selected = part; selectedObj = null; renderAll(); });
         if (part.children) walk(part.children, depth + 1);
       }
     };
@@ -256,11 +282,11 @@ export function createLab({ root, canvas, stock, design: getDesign, onDesign, on
       const labels = SIZE_LABELS[shape];
       const r = row('尺寸');
       const nums = el('div', `fnums ${labels.length === 4 ? 'four' : ''}`, r);
-      labels.forEach((lab, i) => numInput(nums, lab, part.size[i] ?? 0, i >= SHAPES[shape] ? 1 : 0.1, (v) => edit((d, p) => { p.size[i] = i >= SHAPES[shape] ? Math.max(3, Math.round(v)) : Math.max(0.05, v); }, { redraw: false })));
+      labels.forEach((lab, i) => numInput(nums, lab, part.size[i] ?? 0, i >= SHAPES[shape] ? 1 : 0.1, (v) => edit((d, p) => { p.size[i] = i >= SHAPES[shape] ? Math.max(3, Math.round(v)) : Math.max(0.05, v); }, { redraw: false }), `size-${i}`));
     }
     // Position and rotation.
-    vecRow('位置', part.pos || [0, 0, 0], 0.1, (i, v) => edit((d, p) => { (p.pos = p.pos || [0, 0, 0])[i] = v; }, { redraw: false }));
-    vecRow('旋轉°', (part.rot || [0, 0, 0]).map((v) => round(v * DEG, 1)), 5, (i, v) => edit((d, p) => { (p.rot = p.rot || [0, 0, 0])[i] = v / DEG; }, { redraw: false }));
+    vecRow('位置', part.pos || [0, 0, 0], 0.1, (i, v) => edit((d, p) => { (p.pos = p.pos || [0, 0, 0])[i] = v; }, { redraw: false }), 'pos');
+    vecRow('旋轉°', (part.rot || [0, 0, 0]).map((v) => round(v * DEG, 1)), 5, (i, v) => edit((d, p) => { (p.rot = p.rot || [0, 0, 0])[i] = v / DEG; }, { redraw: false }), 'rot');
     if (part.scale) vecRow('縮放', part.scale, 0.1, (i, v) => edit((d, p) => { p.scale[i] = v; }, { redraw: false }));
     // Material.
     if (shape !== 'group') {
@@ -282,17 +308,26 @@ export function createLab({ root, canvas, stock, design: getDesign, onDesign, on
     const info = el('div', 'lnote', ui.fields);
     info.textContent = `${part.children ? `${part.children.length} 個子零件；` : ''}${part.name && JOINTS.has(part.name) ? '這是動畫關節，位置是轉軸。' : part.name && WEAPON_IDS.has(part.name) ? '這是武器模型：對應到武裝「' + weaponZh(part.name) + '」。' : ''}`;
   }
-  function numInput(parent, label, value, step, fn) {
+  function numInput(parent, label, value, step, fn, field = '') {
     const wrap = el('label', '', parent);
     wrap.title = label;
     const inp = el('input', '', wrap); inp.type = 'number'; inp.step = step; inp.value = round(value, 2);
+    if (field) inp.dataset.field = field;
     inp.addEventListener('input', () => { const v = Number(inp.value); if (Number.isFinite(v)) fn(v); });
     return inp;
   }
-  function vecRow(label, vec, step, fn) {
+  function vecRow(label, vec, step, fn, field = '') {
     const r = el('div', 'frow', ui.fields); el('span', '', r, label);
     const nums = el('div', 'fnums', r);
-    ['x', 'y', 'z'].forEach((ax, i) => numInput(nums, ax, vec[i], step, (v) => fn(i, v)));
+    ['x', 'y', 'z'].forEach((ax, i) => numInput(nums, ax, vec[i], step, (v) => fn(i, v), field ? `${field}-${i}` : ''));
+  }
+  // The fields' numbers follow a drag without rebuilding the panel.
+  function refreshFieldValues(part) {
+    for (const inp of ui.fields.querySelectorAll('input[data-field]')) {
+      const [k, i] = inp.dataset.field.split('-');
+      const v = k === 'pos' ? (part.pos || [0, 0, 0])[i] : k === 'rot' ? (part.rot || [0, 0, 0])[i] * DEG : part.size ? part.size[i] : 0;
+      if (document.activeElement !== inp) inp.value = round(v, k === 'rot' ? 1 : 2);
+    }
   }
   function weaponZh(id) { for (const kind of ['ranged', 'melee']) for (const w of Object.values(WEAPONS[kind])) if (w.id === id) return w.zh; return id; }
 
@@ -306,47 +341,222 @@ export function createLab({ root, canvas, stock, design: getDesign, onDesign, on
   }
 
   // ---------------------------------------------------------------- the view
+  // The objects built from a part (both sides of a mirrored one), with the side sign the builder used
+  // for x and for the y / z rotations.
+  function objectsOf(part) {
+    const out = [];
+    if (mech) mech.group.traverse((o) => { if (o.userData.part === part) out.push({ obj: o, sx: o.userData.side === 'L' ? -1 : 1 }); });
+    return out;
+  }
   function refreshHighlight() {
     if (highlight) { highlight.parent && highlight.parent.remove(highlight); highlight = null; }
+    gizmo.hide();
     if (!selected || !mech) return;
-    let target = null;
-    mech.group.traverse((o) => { if (!target && o.userData.part === selected && o.userData.side !== 'L') target = o; });
-    if (!target) mech.group.traverse((o) => { if (!target && o.userData.part === selected) target = o; });
-    if (!target) return;
-    highlight = new THREE.BoxHelper(target, 0xffd040);
+    const objs = objectsOf(selected);
+    if (!objs.length) return;
+    // The object the player picked, or (after a rebuild) the one on the same side, else the right one.
+    const side = selectedObj ? selectedObj.userData.side : 'R';
+    const ref = objs.find((o) => o.obj === selectedObj) || objs.find((o) => o.obj.userData.side === side) || objs.find((o) => o.sx > 0) || objs[0];
+    selectedObj = ref.obj;
+    highlight = new THREE.BoxHelper(ref.obj, 0xffd040);
     highlight.material.depthTest = false;
     highlight.renderOrder = 10;
     mech.group.parent.add(highlight);
+    if (!gizmo.group.parent) mech.group.parent.add(gizmo.group);
+    placeGizmo();
   }
-  function pickPart(e) {
-    if (!mech) return;
+  // The gizmo sits at the selected object's origin: arrows along its parent's axes (the position is in
+  // parent space), rings about the axes its Euler angles turn about, cubes along its own axes.
+  const qTmp = new THREE.Quaternion(), qParent = new THREE.Quaternion(), pTmp = new THREE.Vector3();
+  function gizmoAxes(obj, which) {
+    obj.parent.getWorldQuaternion(qParent);
+    if (which === 'rotate') return eulerAxes(qParent, obj.rotation);
+    const q = which === 'size' ? obj.getWorldQuaternion(qTmp) : qParent;
+    return [new THREE.Vector3(1, 0, 0).applyQuaternion(q), new THREE.Vector3(0, 1, 0).applyQuaternion(q), new THREE.Vector3(0, 0, 1).applyQuaternion(q)];
+  }
+  function placeGizmo() {
+    if (!selected || !selectedObj || !mech) { gizmo.hide(); return; }
+    const shape = selected.shape || 'group';
+    if (mode === 'size' && shape === 'group') { gizmo.hide(); return; }
+    mech.group.updateMatrixWorld(true);
+    selectedObj.getWorldPosition(pTmp);
+    gizmo.show(mode, pTmp, gizmoAxes(selectedObj, mode));
+  }
+  function setMode(m) {
+    mode = m;
+    for (const [k, b] of Object.entries(ui.modes)) b.classList.toggle('on', k === m);
+    placeGizmo();
+  }
+  // Is this object drawn (none of its ancestors hidden)?
+  const shown = (o) => { for (let p = o; p; p = p.parent) if (!p.visible) return false; return true; };
+  function rayAt(e) {
     const r = canvas.getBoundingClientRect();
     ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
     picker.setFromCamera(ndc, cam.camera);
-    const hits = picker.intersectObject(mech.group, true).filter((h) => h.object.visible && h.object.userData.part && h.object.material !== mech.materials.aura);
-    if (!hits.length) return;
-    selected = hits[0].object.userData.part;
+    return picker;
+  }
+  // The part under the pointer: { part, obj } or null.
+  function partAtPointer(e) {
+    if (!mech) return null;
+    const hits = rayAt(e).intersectObject(mech.group, true).filter((h) => h.object.userData.part && shown(h.object) && h.object.material !== mech.materials.aura);
+    return hits.length ? { part: hits[0].object.userData.part, obj: hits[0].object } : null;
+  }
+  function select(part, obj) {
+    selected = part; selectedObj = obj || null;
     click();
     renderAll();
   }
-  const onDown = (e) => { if (!open || e.target !== canvas) return; cam.drag = { x: e.clientX, y: e.clientY, moved: false, button: e.button }; canvas.setPointerCapture(e.pointerId); };
-  const onMove = (e) => {
-    if (!open || !cam.drag) return;
-    const dx = e.clientX - cam.drag.x, dy = e.clientY - cam.drag.y;
-    if (Math.abs(dx) + Math.abs(dy) > 3) cam.drag.moved = true;
-    cam.yaw -= dx * 0.008; cam.pitch = Math.max(-0.4, Math.min(1.3, cam.pitch + dy * 0.006));
-    cam.drag.x = e.clientX; cam.drag.y = e.clientY; cam.idle = 0;
+
+  // ---- dragging the selected part
+  // Snapping with Shift: positions and sizes to a quarter metre, angles to 15°.
+  const snap = (v, step, on) => (on ? Math.round(v / step) * step : v);
+  function beginDrag(kind, axis, e) {
+    // The live objects are found before the edit, which may move the design to a copy.
+    const objs = objectsOf(selected);
+    const ref = objs.find((o) => o.obj === selectedObj) || objs[0];
+    if (!ref) return false;
+    const before = { design, selected };            // to come back to when the drag goes nowhere
+    const part = beginEdit();
+    if (!part) { giveUp(before); return false; }
+    const ray = rayAt(e).ray;
+    mech.group.updateMatrixWorld(true);
+    const origin = ref.obj.getWorldPosition(new THREE.Vector3());
+    const d = { kind, axis, part, objs, sx: ref.sx, origin, before, live: null, start: { pos: (part.pos || [0, 0, 0]).slice(), rot: (part.rot || [0, 0, 0]).slice(), size: (part.size || []).slice() }, moved: false };
+    let ok = true;
+    if (kind === 'move' || kind === 'size') {
+      d.dir = gizmoAxes(ref.obj, kind)[axis];
+      d.t0 = rayAxisParam(ray, origin, d.dir);
+      ok = !Number.isNaN(d.t0);
+    } else if (kind === 'free') {
+      d.normal = cam.camera.getWorldDirection(new THREE.Vector3()).negate();
+      d.p0 = rayPlanePoint(ray, origin, d.normal);
+      ref.obj.parent.getWorldQuaternion(d.parentQ = new THREE.Quaternion());
+      ok = !!d.p0;
+    } else if (kind === 'rotate') {
+      d.dir = gizmoAxes(ref.obj, 'rotate')[axis];
+      Object.assign(d, planeBasis(d.dir));
+      const p = rayPlanePoint(ray, origin, d.dir);
+      ok = !!p;
+      if (p) { d.a0 = angleInPlane(p, origin, d.u, d.v); d.turn = 0; }
+    }
+    if (!ok) { giveUp(before); return false; }
+    drag = d;
+    canvas.setPointerCapture(e.pointerId);
+    return true;
+  }
+  function moveDrag(e) {
+    const d = drag, part = d.part, ray = rayAt(e).ray, shift = e.shiftKey;
+    if (d.kind === 'move') {
+      const t = rayAxisParam(ray, d.origin, d.dir);
+      if (Number.isNaN(t)) return;
+      const delta = snap(t - d.t0, SNAP.move, shift);
+      part.pos = d.start.pos.slice();
+      part.pos[d.axis] = round(d.start.pos[d.axis] + delta * (d.axis === 0 ? d.sx : 1), 3);
+    } else if (d.kind === 'free') {
+      const p = rayPlanePoint(ray, d.origin, d.normal);
+      if (!p) return;
+      // The step across the screen plane, in the parent's frame.
+      const local = p.sub(d.p0).applyQuaternion(qTmp.copy(d.parentQ).invert());
+      part.pos = [round(d.start.pos[0] + snap(local.x, SNAP.move, shift) * d.sx, 3), round(d.start.pos[1] + snap(local.y, SNAP.move, shift), 3), round(d.start.pos[2] + snap(local.z, SNAP.move, shift), 3)];
+    } else if (d.kind === 'rotate') {
+      const p = rayPlanePoint(ray, d.origin, d.dir);
+      if (!p) return;
+      const a = angleInPlane(p, d.origin, d.u, d.v);
+      d.turn += angleDelta(d.a0, a);
+      d.a0 = a;
+      const turn = snap(d.turn, SNAP.rotate, shift);
+      part.rot = d.start.rot.slice();
+      part.rot[d.axis] = round(d.start.rot[d.axis] + turn * (d.axis === 0 ? 1 : d.sx), 4);
+    } else if (d.kind === 'size') {
+      const t = rayAxisParam(ray, d.origin, d.dir);
+      if (Number.isNaN(t)) return;
+      const delta = snap(t - d.t0, SNAP.size, shift);
+      part.size = d.start.size.slice();
+      const grow = (i, k) => { part.size[i] = round(Math.max(0.05, d.start.size[i] + delta * k), 3); };
+      const shape = part.shape || 'group';
+      if (shape === 'box') grow(d.axis, 2);
+      else if (shape === 'cyl') { if (d.axis === 1) grow(2, 2); else { grow(0, 1); grow(1, 1); } }
+      else if (shape === 'cone') { if (d.axis === 1) grow(1, 2); else grow(0, 1); }
+      else if (shape === 'sphere') grow(0, 1);
+    }
+    d.moved = true;
+    applyLive(d);
+  }
+  // The live objects (and the animator's rest pose, for a joint) take the part's new values at once.
+  function applyLive(d) {
+    const part = d.part, pos = part.pos || [0, 0, 0], rot = part.rot || [0, 0, 0];
+    if (d.kind === 'size') {
+      // One fresh geometry (not the builder's shared cache) for the live objects; the last one goes.
+      if (part.shape && part.shape !== 'group') {
+        const g = partGeometry(part.shape, part.size, { cached: false });
+        for (const { obj } of d.objs) if (obj.isMesh) obj.geometry = g;
+        dropLive(d); d.live = g;
+      }
+    } else for (const { obj, sx } of d.objs) {
+      obj.position.set(pos[0] * sx, pos[1], pos[2]);
+      obj.rotation.set(rot[0], rot[1] * sx, rot[2] * sx);
+      const rest = obj.name && mech.rest.get(obj.name);
+      if (rest) { rest.pos.copy(obj.position); rest.rot.copy(obj.rotation); }
+    }
+    if (highlight) highlight.update();
+    placeGizmo();
+    refreshFieldValues(part);
+  }
+  const dropLive = (d) => { if (d.live) { d.live.dispose(); d.live = null; } };
+  // A drag that changed nothing: forget its undo entry (and the copy of the stock design, if any).
+  function giveUp(before) { undo.pop(); design = before.design; selected = before.selected; buttons(); }
+  function endDrag() {
+    const d = drag;
+    drag = null;
+    if (!d) return;
+    if (d.moved) { onDesign(design); renderAll(); } else giveUp(d.before);
+    dropLive(d);                                 // the rebuilt mech has its own geometry
+  }
+
+  const onDown = (e) => {
+    if (!open || e.target !== canvas) return;
+    if (e.button === 0 && selected && selectedObj) {
+      const hit = gizmo.pick(rayAt(e));
+      if (hit && beginDrag(hit.mode, hit.axis, e)) return;
+      const under = partAtPointer(e);
+      if (under && under.part === selected && mode === 'move' && beginDrag('free', 0, e)) return;
+    }
+    drag = { kind: 'cam', x: e.clientX, y: e.clientY, moved: false, button: e.button };
+    canvas.setPointerCapture(e.pointerId);
   };
-  const onUp = (e) => { if (!open || !cam.drag) return; if (!cam.drag.moved && cam.drag.button === 0) pickPart(e); cam.drag = null; };
+  const onMove = (e) => {
+    if (!open) return;
+    if (!drag) {
+      if (selected && e.target === canvas) gizmo.hover(gizmo.pick(rayAt(e)));
+      return;
+    }
+    cam.idle = 0;
+    if (drag.kind !== 'cam') { moveDrag(e); return; }
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+    cam.yaw -= dx * 0.008; cam.pitch = Math.max(-0.4, Math.min(1.3, cam.pitch + dy * 0.006));
+    drag.x = e.clientX; drag.y = e.clientY;
+  };
+  const onUp = (e) => {
+    if (!open || !drag) return;
+    if (drag.kind !== 'cam') { endDrag(); return; }
+    const d = drag; drag = null;
+    if (!d.moved && d.button === 0) { const under = partAtPointer(e); if (under) select(under.part, under.obj); }
+  };
   const onWheel = (e) => { if (!open) return; cam.dist = Math.max(14, Math.min(140, cam.dist * (e.deltaY > 0 ? 1.1 : 0.9))); cam.idle = 0; };
+  const typing = () => { const t = document.activeElement; return !!t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA'); };
   const onKey = (e) => {
     if (!open) return;
     if (e.code === 'Escape') {
-      const t = document.activeElement;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT')) { t.blur(); return; }
+      if (typing()) { document.activeElement.blur(); return; }
+      if (drag && drag.kind !== 'cam') { const d = drag; drag = null; history(undo, redo); dropLive(d); return; }    // drop the drag: back to before it
       e.preventDefault(); onClose && onClose();
+      return;
     }
-    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ' && !(document.activeElement && document.activeElement.tagName === 'INPUT')) { e.preventDefault(); if (e.shiftKey) history(redo, undo); else history(undo, redo); }
+    if (typing()) return;
+    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') { e.preventDefault(); if (e.shiftKey) history(redo, undo); else history(undo, redo); return; }
+    if (e.code === 'KeyW') setMode('move'); else if (e.code === 'KeyE') setMode('rotate'); else if (e.code === 'KeyR') setMode('size');
+    else if ((e.code === 'Delete' || e.code === 'Backspace') && selected) { e.preventDefault(); remove(); }
   };
   let open = false;
   canvas.addEventListener('pointerdown', onDown);
@@ -398,7 +608,7 @@ export function createLab({ root, canvas, stock, design: getDesign, onDesign, on
       open = true;
       mech = m;
       design = getDesign();
-      undo.length = 0; redo.length = 0; selected = null;
+      undo.length = 0; redo.length = 0; selected = null; selectedObj = null; drag = null;
       root.hidden = false;
       cam.idle = 0; show.t = 0;
       renderAll();
@@ -408,6 +618,8 @@ export function createLab({ root, canvas, stock, design: getDesign, onDesign, on
       open = false;
       root.hidden = true;
       if (highlight) { highlight.parent && highlight.parent.remove(highlight); highlight = null; }
+      gizmo.hide();
+      drag = null;
       if (mech) { mech.group.rotation.set(0, mech.group.rotation.y, 0); mech.group.visible = true; }
     },
     // The turntable camera around the mech.
@@ -421,7 +633,8 @@ export function createLab({ root, canvas, stock, design: getDesign, onDesign, on
       camera.position.set(p.x + Math.sin(cam.yaw) * Math.cos(cam.pitch) * cam.dist, cy + Math.sin(cam.pitch) * cam.dist, p.z + Math.cos(cam.yaw) * Math.cos(cam.pitch) * cam.dist);
       camera.lookAt(p.x, cy, p.z);
       if (highlight) highlight.update();
-      ui.status.textContent = `${countParts(design)} 個零件 · ${design === stock ? '原廠設計' : '自訂設計'}`;
+      gizmo.update(camera);
+      ui.status.textContent = `${countParts(design)} 個零件 · ${design === stock ? '原廠設計' : '自訂設計'}${selected ? ` · ${MODES[mode][0]}模式` : ''}`;
     },
     // The mech plays the chosen animation, in place, facing the camera's starting side.
     animate(m, dt) {
@@ -430,14 +643,20 @@ export function createLab({ root, canvas, stock, design: getDesign, onDesign, on
       animateMech(m, st, dt);
       m.group.rotation.y = (m.rootYaw || 0);
       m.group.position.y = (st.onGround ? 0 : 6 + Math.sin(show.t * 2) * 1.5) + (m.rootLift || 0);
-      // The mech's hand nodes may have been rebuilt: keep the highlight on the selected part.
+      // The mech's hand nodes may have been rebuilt: keep the highlight on the selected part; the gizmo
+      // follows the part as the animation moves it (not while it is being dragged).
       if (selected && (!highlight || !highlight.parent)) refreshHighlight();
+      else if (selected && !drag) placeGizmo();
     },
     // After a rebuild (onDesign), the game hands over the new mech object.
-    setMech(m) { mech = m; refreshHighlight(); },
+    setMech(m) { mech = m; if (!drag) { selectedObj = null; refreshHighlight(); } },
+    setMode,
+    get mode() { return mode; },
+    get selected() { return selected; },
     dispose() {
       canvas.removeEventListener('pointerdown', onDown); window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp);
       canvas.removeEventListener('wheel', onWheel); window.removeEventListener('keydown', onKey);
+      gizmo.dispose();
       clearTimeout(saveTimer);
     },
   };

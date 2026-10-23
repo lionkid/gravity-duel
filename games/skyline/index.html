@@ -240,6 +240,11 @@
   #lab .lbtn.primary { border-color: var(--accent); color: var(--accent); }
   #lab .lbtn.danger { border-color: rgba(255, 75, 75, 0.6); color: var(--hot); }
   #lab .lrow { display: flex; gap: 6px; flex-wrap: wrap; }
+  #lab .lmodes { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; margin-left: 6px; }
+  #lab .lmodes .lbtn { border: 0; border-radius: 0; border-right: 1px solid var(--line); }
+  #lab .lmodes .lbtn:last-child { border-right: 0; }
+  #lab .lmodes .lbtn.on { background: rgba(88, 224, 255, 0.16); color: var(--accent); }
+  #lab .lmodes .lbtn small { color: var(--muted); margin-left: 4px; font-size: 10px; }
   #lab .lbottom { left: 12px; right: 12px; bottom: calc(10px + env(safe-area-inset-bottom, 0px)); display: flex; gap: 14px; padding: 8px 12px; align-items: center; flex-wrap: wrap; }
   #lab .lbottom label { color: var(--muted); font-size: 12px; display: flex; gap: 6px; align-items: center; }
   #lab .lbottom select { width: auto; }

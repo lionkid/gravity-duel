@@ -290,7 +290,8 @@ await page.close();
   await ps.close();
 }
 
-// The mech lab and the key settings: open the lab, pick a part, change the animation; rebind a key.
+// The mech lab and the key settings: open the lab, pick a part, drag it with the gizmo, undo, change the
+// animation; rebind a key.
 {
   const pl = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   pl.on('pageerror', (e) => errors.push(`lab pageerror: ${e.message}`));
@@ -300,6 +301,27 @@ await page.close();
   await pl.click('[data-act="lab"]');
   await pl.waitForFunction(() => window.__skyline.labOpen && document.querySelectorAll('#lab .tnode').length > 50, null, { timeout: 30000 });
   await pl.evaluate(() => { [...document.querySelectorAll('#lab .tnode')].find((r) => r.textContent.startsWith('head')).click(); });
+  // Drag the head's x arrow (the move gizmo) 60 px along itself: the design becomes a custom one with
+  // the head moved along x only; one undo brings the stock design back and clears the saved one.
+  await pl.evaluate(() => { document.querySelector('#lab .lbottom input[type=checkbox]').click(); });     // turntable off
+  await framesL(3);
+  const headPos = () => pl.evaluate(() => { const S = window.__skyline; const t = S.design.parts.find((q) => q.name === 'torso'); return { id: S.design.id, pos: t.children.find((c) => c.name === 'head').pos.slice(), stored: !!localStorage.getItem('skyline.mechDesign') }; });
+  const arrow = await pl.evaluate(() => { const S = window.__skyline, THREE = S.app.THREE; const g = S.app.scene.getObjectByName('gizmo'); const h = g.children.filter((c) => c.visible)[0]; h.updateMatrixWorld(true);
+    const at = (y) => { const v = h.localToWorld(new THREE.Vector3(0, y, 0)).project(S.app.camera); return { x: (v.x + 1) / 2 * innerWidth, y: (1 - v.y) / 2 * innerHeight }; };
+    return { tip: at(1.0), base: at(0.3), mode: S.lab.mode }; });
+  const before = await headPos();
+  const dir = { x: arrow.tip.x - arrow.base.x, y: arrow.tip.y - arrow.base.y }; const len = Math.hypot(dir.x, dir.y) || 1;
+  await pl.mouse.move(arrow.tip.x, arrow.tip.y); await framesL(2); await pl.mouse.down(); await framesL(1);
+  for (let i = 1; i <= 6; i++) { await pl.mouse.move(arrow.tip.x + dir.x / len * 10 * i, arrow.tip.y + dir.y / len * 10 * i); await framesL(1); }
+  await pl.mouse.up(); await framesL(3);
+  const after = await headPos();
+  await pl.keyboard.press('Control+KeyZ'); await framesL(3);
+  const undone = await headPos();
+  const movedX = after.pos[0] !== before.pos[0] && after.pos[1] === before.pos[1] && after.pos[2] === before.pos[2];
+  console.log(`  lab drag (${arrow.mode}): head x ${before.pos[0]} → ${after.pos[0]} (${after.id}${after.stored ? ', saved' : ''}), undo → ${undone.pos[0]} (${undone.id}${undone.stored ? ', still saved' : ''})`);
+  if (before.id !== 'ax01' || after.id !== 'custom' || !movedX || !after.stored) errors.push('lab: dragging the move gizmo did not move the part along its axis');
+  if (undone.id !== 'ax01' || undone.stored || undone.pos[0] !== before.pos[0]) errors.push('lab: undo did not bring the stock design back');
+  await pl.evaluate(() => { document.querySelector('#lab .lbottom input[type=checkbox]').click(); });     // turntable on again
   await pl.selectOption('#lab .lbottom select >> nth=0', 'slash');
   await pl.selectOption('#lab .lbottom select >> nth=1', 'melee');
   await pl.waitForTimeout(800); await framesL(12);

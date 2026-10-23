@@ -16,17 +16,24 @@
 import * as THREE from 'three';
 
 const geoCache = new Map();
+// The geometry for a part's shape and size, shared between parts that ask for the same one.
+// The geometry of a part, shared from the cache, or (for a size that changes every frame, as a part is
+// dragged) a fresh one the caller owns and disposes.
+export function partGeometry(shape, size, { cached = true } = {}) { return cached ? geometry(shape, size) : makeGeometry(shape, size); }
+function makeGeometry(shape, size) {
+  switch (shape) {
+    case 'box': return new THREE.BoxGeometry(size[0], size[1], size[2]);
+    case 'cyl': return new THREE.CylinderGeometry(size[0], size[1], size[2], size[3] || 12);
+    case 'cone': return new THREE.ConeGeometry(size[0], size[1], size[2] || 8);
+    case 'sphere': return new THREE.SphereGeometry(size[0], size[1] || 12, (size[1] || 12) >> 1 || 6);
+    default: throw new Error(`unknown shape ${shape}`);
+  }
+}
 function geometry(shape, size) {
   const key = `${shape}:${size.join(',')}`;
   let g = geoCache.get(key);
   if (g) return g;
-  switch (shape) {
-    case 'box': g = new THREE.BoxGeometry(size[0], size[1], size[2]); break;
-    case 'cyl': g = new THREE.CylinderGeometry(size[0], size[1], size[2], size[3] || 12); break;
-    case 'cone': g = new THREE.ConeGeometry(size[0], size[1], size[2] || 8); break;
-    case 'sphere': g = new THREE.SphereGeometry(size[0], size[1] || 12, (size[1] || 12) >> 1 || 6); break;
-    default: throw new Error(`unknown shape ${shape}`);
-  }
+  g = makeGeometry(shape, size);
   geoCache.set(key, g);
   return g;
 }
